@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="src/HLAS.Application/HLAS.Application.csproj" />
+  <Project Path="src/HLAS.Desktop/HLAS.Desktop.csproj" />
+  <Project Path="src/HLAS.Domain/HLAS.Domain.csproj" />
+  <Project Path="src/HLAS.Infrastructure/HLAS.Infrastructure.csproj" />
+  <Project Path="src/HLAS.VSeries/HLAS.VSeries.csproj" />
+  <Project Path="tests/HLAS.Tests/HLAS.Tests.csproj" />
+</Solution>
