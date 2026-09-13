@@ -6,4 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\HLAS.Domain\HLAS.Domain.csproj" />
+    <ProjectReference Include="..\HLAS.VSeries\HLAS.VSeries.csproj" />
+  </ItemGroup>
+
 </Project>

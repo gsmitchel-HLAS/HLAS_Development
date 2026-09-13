@@ -8,4 +8,9 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\HLAS.Application\HLAS.Application.csproj" />
+    <ProjectReference Include="..\HLAS.Infrastructure\HLAS.Infrastructure.csproj" />
+  </ItemGroup>
+
 </Project>
