@@ -74,40 +74,10 @@ namespace HLAS.Infrastructure
                     using SqliteTransaction transaction =
                         connection.BeginTransaction();
 
-                    using SqliteCommand createTable =
-                        connection.CreateCommand();
-
-                    createTable.Transaction = transaction;
-                    createTable.CommandText =
-                        """
-                        CREATE TABLE HLAS_Project_Metadata
-                        (
-                            SingletonId INTEGER NOT NULL
-                                PRIMARY KEY
-                                CHECK (SingletonId = 1),
-                            ProjectId TEXT NOT NULL
-                        );
-                        """;
-
-                    createTable.ExecuteNonQuery();
-
-                    using SqliteCommand insertIdentity =
-                        connection.CreateCommand();
-
-                    insertIdentity.Transaction = transaction;
-                    insertIdentity.CommandText =
-                        """
-                        INSERT INTO HLAS_Project_Metadata
-                            (SingletonId, ProjectId)
-                        VALUES
-                            (1, $projectId);
-                        """;
-
-                    insertIdentity.Parameters.AddWithValue(
-                        "$projectId",
-                        manifest.ProjectId.Value.ToString("D"));
-
-                    insertIdentity.ExecuteNonQuery();
+                    ProjectDatabaseSchema.InitializeNewDatabase(
+      connection,
+      transaction,
+      manifest.ProjectId);
 
                     transaction.Commit();
                 }

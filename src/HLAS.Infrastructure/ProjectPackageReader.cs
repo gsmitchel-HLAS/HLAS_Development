@@ -45,13 +45,22 @@ namespace HLAS.Infrastructure
                 ProjectManifest manifest =
                     ReadManifest(manifestPath);
 
-                Guid databaseProjectId =
-                    ReadDatabaseProjectId(databasePath);
+                (Guid ProjectId, int DatabaseSchemaVersion)
+                    databaseMetadata =
+                        ReadDatabaseMetadata(databasePath);
 
-                if (manifest.ProjectId.Value != databaseProjectId)
+                if (manifest.ProjectId.Value !=
+                    databaseMetadata.ProjectId)
                 {
                     throw new InvalidOperationException(
                         "SAFE-STOP: Manifest ProjectId does not match database ProjectId.");
+                }
+
+                if (databaseMetadata.DatabaseSchemaVersion !=
+                    ProjectDatabaseSchema.CurrentDatabaseSchemaVersion)
+                {
+                    throw new InvalidOperationException(
+                        "SAFE-STOP: Database schema version is unsupported.");
                 }
 
                 return manifest;
@@ -116,8 +125,10 @@ namespace HLAS.Infrastructure
                     createdUtcValue));
         }
 
-        private static Guid ReadDatabaseProjectId(
-            string databasePath)
+        private static (
+            Guid ProjectId,
+            int DatabaseSchemaVersion)
+            ReadDatabaseMetadata(string databasePath)
         {
             SqliteConnectionStringBuilder builder = new()
             {
@@ -136,15 +147,25 @@ namespace HLAS.Infrastructure
 
             command.CommandText =
                 """
-                SELECT ProjectId
+                SELECT
+                    ProjectId,
+                    DatabaseSchemaVersion
                 FROM HLAS_Project_Metadata
                 WHERE SingletonId = 1;
                 """;
 
-            object? result = command.ExecuteScalar();
+            using SqliteDataReader reader =
+                command.ExecuteReader();
 
-            if (result is not string projectIdText ||
-                !Guid.TryParse(
+            if (!reader.Read())
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Database project metadata is missing.");
+            }
+
+            string projectIdText = reader.GetString(0);
+
+            if (!Guid.TryParse(
                     projectIdText,
                     out Guid projectId))
             {
@@ -152,7 +173,18 @@ namespace HLAS.Infrastructure
                     "SAFE-STOP: Database ProjectId is invalid.");
             }
 
-            return projectId;
+            int databaseSchemaVersion =
+                reader.GetInt32(1);
+
+            if (databaseSchemaVersion < 1)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Database schema version is invalid.");
+            }
+
+            return (
+                projectId,
+                databaseSchemaVersion);
         }
     }
 }

@@ -136,6 +136,70 @@ namespace HLAS.Tests
             }
         }
 
+        [TestMethod]
+        public void Open_UnsupportedDatabaseSchemaVersion_SafeStops()
+        {
+            string projectRoot = CreateTemporaryProjectRootPath();
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(projectRoot);
+
+                string databasePath = Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                ReplaceDatabaseSchemaVersion(
+                    databasePath,
+                    999);
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectPackageReader.Open(projectRoot));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "schema version is unsupported");
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+
+        [TestMethod]
+        public void Open_MissingDatabaseSchemaVersion_SafeStops()
+        {
+            string projectRoot = CreateTemporaryProjectRootPath();
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(projectRoot);
+
+                string databasePath = Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                RemoveDatabaseSchemaVersion(databasePath);
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectPackageReader.Open(projectRoot));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+
         private static string CreateTemporaryProjectRootPath()
         {
             return Path.Combine(
@@ -186,6 +250,116 @@ namespace HLAS.Tests
                 replacementProjectId.ToString("D"));
 
             command.ExecuteNonQuery();
+        }
+
+        private static void ReplaceDatabaseSchemaVersion(
+            string databasePath,
+            int replacementVersion)
+        {
+            SqliteConnectionStringBuilder builder = new()
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false
+            };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.CommandText =
+                """
+                UPDATE HLAS_Project_Metadata
+                SET DatabaseSchemaVersion = $version
+                WHERE SingletonId = 1;
+                """;
+
+            command.Parameters.AddWithValue(
+                "$version",
+                replacementVersion);
+
+            command.ExecuteNonQuery();
+        }
+
+        private static void RemoveDatabaseSchemaVersion(
+            string databasePath)
+        {
+            SqliteConnectionStringBuilder builder = new()
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false
+            };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            using SqliteTransaction transaction =
+                connection.BeginTransaction();
+
+            using SqliteCommand renameTable =
+                connection.CreateCommand();
+
+            renameTable.Transaction = transaction;
+            renameTable.CommandText =
+                """
+                ALTER TABLE HLAS_Project_Metadata
+                RENAME TO HLAS_Project_Metadata_Old;
+                """;
+
+            renameTable.ExecuteNonQuery();
+
+            using SqliteCommand createTable =
+                connection.CreateCommand();
+
+            createTable.Transaction = transaction;
+            createTable.CommandText =
+                """
+                CREATE TABLE HLAS_Project_Metadata
+                (
+                    SingletonId INTEGER NOT NULL
+                        PRIMARY KEY
+                        CHECK (SingletonId = 1),
+                    ProjectId TEXT NOT NULL
+                );
+                """;
+
+            createTable.ExecuteNonQuery();
+
+            using SqliteCommand copyData =
+                connection.CreateCommand();
+
+            copyData.Transaction = transaction;
+            copyData.CommandText =
+                """
+                INSERT INTO HLAS_Project_Metadata
+                    (SingletonId, ProjectId)
+                SELECT
+                    SingletonId,
+                    ProjectId
+                FROM HLAS_Project_Metadata_Old;
+                """;
+
+            copyData.ExecuteNonQuery();
+
+            using SqliteCommand dropOldTable =
+                connection.CreateCommand();
+
+            dropOldTable.Transaction = transaction;
+            dropOldTable.CommandText =
+                """
+                DROP TABLE HLAS_Project_Metadata_Old;
+                """;
+
+            dropOldTable.ExecuteNonQuery();
+
+            transaction.Commit();
         }
     }
 }
