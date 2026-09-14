@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\HLAS.Domain\HLAS.Domain.csproj" />
+    <ProjectReference Include="..\..\src\HLAS.Infrastructure\HLAS.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -15,5 +15,18 @@ namespace HLAS.Domain
         {
             return new GovernedTimestamp(DateTimeOffset.UtcNow);
         }
+
+        public static GovernedTimestamp FromRecorded(
+            DateTimeOffset value)
+        {
+            if (value == default)
+            {
+                throw new ArgumentException(
+                    "Recorded governed timestamp must be populated.",
+                    nameof(value));
+            }
+
+            return new GovernedTimestamp(value);
+        }
     }
 }
