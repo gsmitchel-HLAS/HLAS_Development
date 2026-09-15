@@ -1,24 +1,47 @@
-﻿using System.Text;
+﻿using HLAS.Application;
+using HLAS.Domain;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
 
 namespace HLAS.Desktop
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
     public partial class MainWindow : Window
     {
+        private readonly ShellContext _context;
+        private readonly ShellCommandRouter _router = new();
+
         public MainWindow()
         {
             InitializeComponent();
+
+            _context = new ShellContext(
+                ProjectId.CreateNew(),
+                UserId.CreateNew(),
+                ProjectRole.Admin,
+                SeriesId.V);
+
+            ProjectContextText.Text =
+                $"DEVELOPMENTAL: {_context.ProjectId}";
+
+            UserContextText.Text =
+                $"DEVELOPMENTAL: {_context.UserId}";
+
+            RoleContextText.Text =
+                _context.ProjectRole?.ToString() ?? "None";
+
+            SeriesContextText.Text =
+                _context.SeriesId?.ToString() ?? "None";
+        }
+
+        private void ShowContextButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            ShellCommandResult result =
+                _router.Route(
+                    ShellCommand.ShowContext,
+                    _context);
+
+            CommandResultText.Text = result.Message;
         }
     }
 }
