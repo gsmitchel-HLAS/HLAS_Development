@@ -60,13 +60,13 @@ namespace HLAS.Tests
             EquivalenceCoverageSummary summary =
                 harness.GetCoverageSummary();
 
-            Assert.AreEqual(
-                1,
-                harness.Definitions.Count);
+            Assert.HasCount(
+    1,
+    harness.Definitions);
 
-            Assert.AreEqual(
+            Assert.HasCount(
                 2,
-                attempts.Count);
+                attempts);
 
             Assert.AreEqual(
                 EquivalenceOutcome.Fail,
