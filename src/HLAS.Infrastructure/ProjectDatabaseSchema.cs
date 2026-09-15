@@ -6,9 +6,10 @@ namespace HLAS.Infrastructure
 {
     public static class ProjectDatabaseSchema
     {
-        public const int CurrentDatabaseSchemaVersion = 2;
+        public const int CurrentDatabaseSchemaVersion = 3;
 
         public const int Version1 = 1;
+        public const int Version2 = 2;
 
         public static void InitializeNewDatabase(
             SqliteConnection connection,
@@ -30,6 +31,10 @@ namespace HLAS.Infrastructure
                 transaction);
 
             CreateEvidenceCustodyTable(
+                connection,
+                transaction);
+
+            CreateGovernedOperationsTable(
                 connection,
                 transaction);
 
@@ -86,35 +91,40 @@ namespace HLAS.Infrastructure
                 connection,
                 transaction);
 
-            using SqliteCommand updateVersion =
-                connection.CreateCommand();
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version1,
+                Version2);
+        }
 
-            updateVersion.Transaction = transaction;
-            updateVersion.CommandText =
-                """
-                UPDATE HLAS_Project_Metadata
-                SET DatabaseSchemaVersion = $newVersion
-                WHERE
-                    SingletonId = 1
-                    AND DatabaseSchemaVersion = $oldVersion;
-                """;
+        public static void MigrateVersion2ToVersion3(
+            SqliteConnection connection,
+            SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
 
-            updateVersion.Parameters.AddWithValue(
-                "$newVersion",
-                CurrentDatabaseSchemaVersion);
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
 
-            updateVersion.Parameters.AddWithValue(
-                "$oldVersion",
-                Version1);
-
-            int changedRows =
-                updateVersion.ExecuteNonQuery();
-
-            if (changedRows != 1)
+            if (currentVersion != Version2)
             {
                 throw new InvalidOperationException(
-                    "SAFE-STOP: Database schema version could not be advanced safely.");
+                    "SAFE-STOP: Version 2 to Version 3 migration requires database schema version 2.");
             }
+
+            CreateGovernedOperationsTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version2,
+                CurrentDatabaseSchemaVersion);
         }
 
         private static void CreateProjectMetadataTable(
@@ -166,6 +176,120 @@ namespace HLAS.Infrastructure
                 """;
 
             command.ExecuteNonQuery();
+        }
+
+        private static void CreateGovernedOperationsTable(
+            SqliteConnection connection,
+            SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+                CREATE TABLE HLAS_Governed_Operations
+                (
+                    OperationId TEXT NOT NULL
+                        PRIMARY KEY,
+                    ProjectId TEXT NOT NULL,
+                    UserId TEXT NOT NULL,
+                    SeriesId TEXT NOT NULL,
+                    ProjectRole TEXT NOT NULL,
+                    StartedUtc TEXT NOT NULL,
+                    CompletedUtc TEXT NULL,
+                    Outcome TEXT NULL
+                        CHECK
+                        (
+                            Outcome IS NULL
+                            OR Outcome IN
+                            (
+                                'SUCCESS',
+                                'SAFE-STOP',
+                                'TECHNICAL FAILURE'
+                            )
+                        ),
+                    Decision TEXT NULL,
+                    Reason TEXT NULL,
+
+                    CHECK
+                    (
+                        (
+                            CompletedUtc IS NULL
+                            AND Outcome IS NULL
+                            AND Decision IS NULL
+                            AND Reason IS NULL
+                        )
+                        OR
+                        (
+                            CompletedUtc IS NOT NULL
+                            AND Outcome = 'SUCCESS'
+                            AND
+                            (
+                                (
+                                    Decision IS NULL
+                                    AND Reason IS NULL
+                                )
+                                OR
+                                (
+                                    Decision IS NOT NULL
+                                    AND Reason IS NOT NULL
+                                )
+                            )
+                        )
+                        OR
+                        (
+                            CompletedUtc IS NOT NULL
+                            AND Outcome IN
+                            (
+                                'SAFE-STOP',
+                                'TECHNICAL FAILURE'
+                            )
+                            AND Decision IS NOT NULL
+                            AND Reason IS NOT NULL
+                        )
+                    )
+                );
+                """;
+
+            command.ExecuteNonQuery();
+        }
+
+        private static void UpdateDatabaseSchemaVersion(
+            SqliteConnection connection,
+            SqliteTransaction transaction,
+            int oldVersion,
+            int newVersion)
+        {
+            using SqliteCommand updateVersion =
+                connection.CreateCommand();
+
+            updateVersion.Transaction = transaction;
+            updateVersion.CommandText =
+                """
+                UPDATE HLAS_Project_Metadata
+                SET DatabaseSchemaVersion = $newVersion
+                WHERE
+                    SingletonId = 1
+                    AND DatabaseSchemaVersion = $oldVersion;
+                """;
+
+            updateVersion.Parameters.AddWithValue(
+                "$newVersion",
+                newVersion);
+
+            updateVersion.Parameters.AddWithValue(
+                "$oldVersion",
+                oldVersion);
+
+            int changedRows =
+                updateVersion.ExecuteNonQuery();
+
+            if (changedRows != 1)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Database schema version could not be advanced safely.");
+            }
         }
 
         private static int ReadDatabaseSchemaVersion(
