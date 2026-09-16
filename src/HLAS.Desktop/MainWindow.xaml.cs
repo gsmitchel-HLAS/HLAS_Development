@@ -43,5 +43,12 @@ namespace HLAS.Desktop
 
             CommandResultText.Text = result.Message;
         }
+        private void SelectProductionSourceButton_Click(
+    object sender,
+    RoutedEventArgs e)
+        {
+            CommandResultText.Text =
+                "Developmental Production Source selection is not yet connected.";
+        }
     }
 }

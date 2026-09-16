@@ -97,15 +97,22 @@
             </Grid>
         </Border>
 
-        <Button Grid.Row="4"
-                x:Name="ShowContextButton"
-                Content="Show Developmental Context"
-                Width="220"
-                Height="36"
-                HorizontalAlignment="Left"
-                IsEnabled="True"
-                Click="ShowContextButton_Click"/>
+        <StackPanel Grid.Row="4"
+            Orientation="Horizontal">
 
+            <Button x:Name="ShowContextButton"
+            Content="Show Developmental Context"
+            Width="220"
+            Height="36"
+            Click="ShowContextButton_Click"/>
+
+            <Button x:Name="SelectProductionSourceButton"
+            Content="Select Developmental Production Source"
+            Width="280"
+            Height="36"
+            Margin="12,0,0,0"
+            Click="SelectProductionSourceButton_Click"/>
+        </StackPanel>
         <Border Grid.Row="6"
                 BorderBrush="Gray"
                 BorderThickness="1"
