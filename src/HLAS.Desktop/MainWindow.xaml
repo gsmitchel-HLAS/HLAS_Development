@@ -112,6 +112,13 @@
             Height="36"
             Margin="12,0,0,0"
             Click="SelectProductionSourceButton_Click"/>
+            
+            <Button x:Name="ViewProductionSourceButton"
+        Content="View Last Developmental Production Source"
+        Width="300"
+        Height="36"
+        Margin="12,0,0,0"
+        Click="ViewProductionSourceButton_Click"/>
         </StackPanel>
         <Border Grid.Row="6"
                 BorderBrush="Gray"

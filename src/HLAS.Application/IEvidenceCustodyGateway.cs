@@ -7,5 +7,9 @@ namespace HLAS.Application
         EvidenceCustodyRecord Accept(
             string projectRoot,
             string sourceFilePath);
+
+        EvidenceCustodyRetrievalResult Retrieve(
+            string projectRoot,
+            EvidenceId evidenceId);
     }
 }

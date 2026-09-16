@@ -241,7 +241,173 @@ namespace HLAS.Tests
                 DeleteTemporaryTestRoot(testRoot);
             }
         }
+        [TestMethod]
+        public void Retrieve_ValidEvidence_UsesGovernedCustodyWithoutOriginalSource()
+        {
+            string testRoot = CreateTemporaryTestRoot();
+            string projectRoot = Path.Combine(testRoot, "Project");
+            string sourceDirectory = Path.Combine(testRoot, "Original");
 
+            Directory.CreateDirectory(sourceDirectory);
+
+            string sourcePath =
+                Path.Combine(sourceDirectory, "Retrieval Source.txt");
+
+            byte[] originalBytes =
+                "HLAS governed retrieval evidence."u8.ToArray();
+
+            File.WriteAllBytes(
+                sourcePath,
+                originalBytes);
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord accepted =
+                    EvidenceCustodyService.Accept(
+                        projectRoot,
+                        sourcePath);
+
+                File.Delete(sourcePath);
+
+                EvidenceCustodyRetrievedFile retrieved =
+                    EvidenceCustodyRetrievalService.Retrieve(
+                        projectRoot,
+                        accepted.EvidenceId);
+
+                Assert.AreEqual(
+                    accepted,
+                    retrieved.EvidenceRecord);
+
+                Assert.IsFalse(
+                    File.Exists(sourcePath));
+
+                CollectionAssert.AreEqual(
+                    originalBytes,
+                    File.ReadAllBytes(
+                        retrieved.ControlledFilePath));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(testRoot);
+            }
+        }
+
+        [TestMethod]
+        public void Retrieve_MissingEvidenceId_SafeStops()
+        {
+            string testRoot = CreateTemporaryTestRoot();
+            string projectRoot = Path.Combine(testRoot, "Project");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceId missingEvidenceId =
+                    EvidenceId.CreateNew();
+
+                Assert.ThrowsExactly<InvalidOperationException>(
+                    () => EvidenceCustodyRetrievalService.Retrieve(
+                        projectRoot,
+                        missingEvidenceId));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(testRoot);
+            }
+        }
+
+        [TestMethod]
+        public void Retrieve_MissingControlledFile_SafeStops()
+        {
+            string testRoot = CreateTemporaryTestRoot();
+            string projectRoot = Path.Combine(testRoot, "Project");
+            string sourceDirectory = Path.Combine(testRoot, "Original");
+
+            Directory.CreateDirectory(sourceDirectory);
+
+            string sourcePath =
+                Path.Combine(sourceDirectory, "Missing Custody Source.txt");
+
+            File.WriteAllText(
+                sourcePath,
+                "HLAS missing controlled file proof.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord accepted =
+                    EvidenceCustodyService.Accept(
+                        projectRoot,
+                        sourcePath);
+
+                string controlledFilePath =
+                    Path.Combine(
+                        projectRoot,
+                        accepted.RelativeCustodyPath);
+
+                File.Delete(controlledFilePath);
+
+                Assert.ThrowsExactly<FileNotFoundException>(
+                    () => EvidenceCustodyRetrievalService.Retrieve(
+                        projectRoot,
+                        accepted.EvidenceId));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(testRoot);
+            }
+        }
+
+        [TestMethod]
+        public void Retrieve_TamperedControlledFile_SafeStops()
+        {
+            string testRoot = CreateTemporaryTestRoot();
+            string projectRoot = Path.Combine(testRoot, "Project");
+            string sourceDirectory = Path.Combine(testRoot, "Original");
+
+            Directory.CreateDirectory(sourceDirectory);
+
+            string sourcePath =
+                Path.Combine(sourceDirectory, "Tamper Source.bin");
+
+            byte[] originalBytes =
+                new byte[] { 1, 2, 3, 4, 5, 6 };
+
+            File.WriteAllBytes(
+                sourcePath,
+                originalBytes);
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord accepted =
+                    EvidenceCustodyService.Accept(
+                        projectRoot,
+                        sourcePath);
+
+                string controlledFilePath =
+                    Path.Combine(
+                        projectRoot,
+                        accepted.RelativeCustodyPath);
+
+                File.WriteAllBytes(
+                    controlledFilePath,
+                    new byte[] { 6, 5, 4, 3, 2, 1 });
+
+                Assert.ThrowsExactly<InvalidOperationException>(
+                    () => EvidenceCustodyRetrievalService.Retrieve(
+                        projectRoot,
+                        accepted.EvidenceId));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(testRoot);
+            }
+        }
         private static void VerifyDatabaseCustodyRecord(
             string projectRoot,
             EvidenceCustodyRecord expected)

@@ -1,6 +1,7 @@
 ﻿using HLAS.Application;
 using HLAS.Domain;
 using Microsoft.Win32;
+using System.Diagnostics;
 using System.Windows;
 
 namespace HLAS.Desktop
@@ -11,7 +12,8 @@ namespace HLAS.Desktop
         private readonly ShellContext _context;
         private readonly ShellCommandRouter _router = new();
         private readonly ProductionSourceEvidenceIntakeService _productionIntakeService;
-
+        private readonly ProductionSourceEvidenceRetrievalService _productionRetrievalService;
+        private EvidenceId? _lastProductionEvidenceId;
         public MainWindow()
         {
             InitializeComponent();
@@ -29,6 +31,10 @@ namespace HLAS.Desktop
                 new ProductionSourceEvidenceIntakeService(
                     new EvidenceCustodyGatewayAdapter());
 
+            _productionRetrievalService =
+    new ProductionSourceEvidenceRetrievalService(
+        new EvidenceCustodyGatewayAdapter());
+                        
             ProjectContextText.Text =
                 $"DEVELOPMENTAL: {_context.ProjectId}";
 
@@ -106,6 +112,9 @@ namespace HLAS.Desktop
                         _developmentalSession.ProjectRoot,
                         request);
 
+                _lastProductionEvidenceId =
+    result.EvidenceRecord.EvidenceId;
+
                 CommandResultText.Text =
                     $"{result.Message}\n" +
                     $"Evidence ID: {result.EvidenceRecord.EvidenceId}\n" +
@@ -120,6 +129,68 @@ namespace HLAS.Desktop
             }
         }
 
+        private void ViewProductionSourceButton_Click(
+      object sender,
+      RoutedEventArgs e)
+        {
+            try
+            {
+                EvidenceId evidenceId =
+                    _lastProductionEvidenceId
+                    ?? throw new InvalidOperationException(
+                        "No developmental Production Source Evidence has been accepted in this session.");
+
+                ProjectId projectId =
+                    _context.ProjectId
+                    ?? throw new InvalidOperationException(
+                        "Developmental ProjectId is not available.");
+
+                UserId userId =
+                    _context.UserId
+                    ?? throw new InvalidOperationException(
+                        "Developmental UserId is not available.");
+
+                ProjectRole projectRole =
+                    _context.ProjectRole
+                    ?? throw new InvalidOperationException(
+                        "Developmental ProjectRole is not available.");
+
+                SeriesId seriesId =
+                    _context.SeriesId
+                    ?? throw new InvalidOperationException(
+                        "Developmental SeriesId is not available.");
+
+                ProductionSourceEvidenceRetrievalRequest request =
+                    new(
+                        projectId,
+                        userId,
+                        projectRole,
+                        seriesId,
+                        evidenceId);
+
+                EvidenceCustodyRetrievalResult result =
+                    _productionRetrievalService.Retrieve(
+                        _developmentalSession.ProjectRoot,
+                        request);
+
+                Process.Start(
+                    new ProcessStartInfo
+                    {
+                        FileName = result.ControlledFilePath,
+                        UseShellExecute = true
+                    });
+
+                CommandResultText.Text =
+                    $"Developmental Production Source Evidence retrieval completed.\n" +
+                    $"Evidence ID: {result.EvidenceRecord.EvidenceId}\n" +
+                    $"Controlled file: {result.ControlledFilePath}";
+            }
+            catch (Exception ex)
+            {
+                CommandResultText.Text =
+                    $"Developmental Production Source retrieval failed: {ex.Message}";
+            }
+        }
         protected override void OnClosed(EventArgs e)
         {
             _developmentalSession.Dispose();

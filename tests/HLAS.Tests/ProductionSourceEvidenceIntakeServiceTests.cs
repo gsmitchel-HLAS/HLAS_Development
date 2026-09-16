@@ -84,6 +84,15 @@ namespace HLAS.Tests
 
                 return _record;
             }
+
+
+            public EvidenceCustodyRetrievalResult Retrieve(
+        string projectRoot,
+        EvidenceId evidenceId)
+            {
+                throw new System.NotSupportedException(
+                    "Retrieval is not used by this intake-service test.");
+            }
         }
     }
 }

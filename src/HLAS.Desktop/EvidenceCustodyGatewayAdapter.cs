@@ -15,5 +15,18 @@ namespace HLAS.Desktop
                 projectRoot,
                 sourceFilePath);
         }
+        public EvidenceCustodyRetrievalResult Retrieve(
+    string projectRoot,
+    EvidenceId evidenceId)
+        {
+            EvidenceCustodyRetrievedFile retrieved =
+                EvidenceCustodyRetrievalService.Retrieve(
+                    projectRoot,
+                    evidenceId);
+
+            return new EvidenceCustodyRetrievalResult(
+                retrieved.EvidenceRecord,
+                retrieved.ControlledFilePath);
+        }
     }
 }
