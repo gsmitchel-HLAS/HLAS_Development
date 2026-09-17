@@ -13,6 +13,7 @@ namespace HLAS.Desktop
         private readonly ShellCommandRouter _router = new();
         private readonly ProductionSourceEvidenceIntakeService _productionIntakeService;
         private readonly ProductionSourceEvidenceRetrievalService _productionRetrievalService;
+        private readonly DevelopmentalProjectHistoryProofService _projectHistoryProofService;
         private EvidenceId? _lastProductionEvidenceId;
         public MainWindow()
         {
@@ -34,7 +35,10 @@ namespace HLAS.Desktop
             _productionRetrievalService =
     new ProductionSourceEvidenceRetrievalService(
         new EvidenceCustodyGatewayAdapter());
-                        
+
+            _projectHistoryProofService =
+      new DevelopmentalProjectHistoryProofService(
+          new DevelopmentalProjectHistoryProofGatewayAdapter());
             ProjectContextText.Text =
                 $"DEVELOPMENTAL: {_context.ProjectId}";
 
@@ -191,6 +195,60 @@ namespace HLAS.Desktop
             $"Developmental Production Source retrieval failed: {ex.Message}";
     }
 }
+       
+        private void RunDevelopmentalHistoryProofButton_Click(
+    object sender,
+    RoutedEventArgs e)
+        {
+            OpenFolderDialog dialog = new()
+            {
+                Title = "Select Persistent Developmental HLAS Project Folder"
+            };
+
+            if (dialog.ShowDialog() != true)
+            {
+                CommandResultText.Text =
+                    "Persistent developmental project selection cancelled.";
+
+                return;
+            }
+
+            try
+            {
+                UserId userId =
+                    _context.UserId
+                    ?? throw new InvalidOperationException(
+                        "Developmental UserId is not available.");
+
+                ProjectRole projectRole =
+                    _context.ProjectRole
+                    ?? throw new InvalidOperationException(
+                        "Developmental ProjectRole is not available.");
+
+                SeriesId seriesId =
+                    _context.SeriesId
+                    ?? throw new InvalidOperationException(
+                        "Developmental SeriesId is not available.");
+
+                DevelopmentalProjectHistoryProofResult result =
+                    _projectHistoryProofService.Execute(
+                        dialog.FolderName,
+                        userId,
+                        seriesId,
+                        projectRole);
+
+                CommandResultText.Text =
+                    $"Persistent developmental project-history proof completed.\n" +
+                    $"Project ID: {result.ProjectId}\n" +
+                    $"Operation ID: {result.OperationId}\n" +
+                    $"Project root: {result.ProjectRoot}";
+            }
+            catch (Exception ex)
+            {
+                CommandResultText.Text =
+                    $"Persistent developmental project-history proof failed: {ex.Message}";
+            }
+        }
         protected override void OnClosed(EventArgs e)
         {
             _developmentalSession.Dispose();
