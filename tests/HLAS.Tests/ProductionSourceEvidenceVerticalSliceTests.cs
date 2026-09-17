@@ -91,32 +91,219 @@ namespace HLAS.Tests
                 DeleteTemporaryTestRoot(testRoot);
             }
         }
+        [TestMethod]
+        public void Intake_SameProductionSourceTwice_SafeStopsBeforeSecondCustody()
+        {
+            string testRoot = CreateTemporaryTestRoot();
+            string projectRoot = Path.Combine(
+                testRoot,
+                "Project");
 
+            string sourceDirectory = Path.Combine(
+                testRoot,
+                "Original");
+
+            Directory.CreateDirectory(sourceDirectory);
+
+            string sourcePath = Path.Combine(
+                sourceDirectory,
+                "Duplicate Production Source.txt");
+
+            File.WriteAllBytes(
+                sourcePath,
+                "HLAS duplicate Production Source Evidence."u8.ToArray());
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(projectRoot);
+
+                ProjectManifest manifest =
+                    ProjectPackageReader.Open(projectRoot);
+
+                ProductionSourceEvidenceIntakeRequest request = new(
+                    manifest.ProjectId,
+                    UserId.CreateNew(),
+                    ProjectRole.Admin,
+                    SeriesId.V,
+                    sourcePath);
+
+                ProductionSourceEvidenceIntakeService service = new(
+                    new RealEvidenceCustodyGateway());
+
+                _ = service.Intake(
+                    projectRoot,
+                    request);
+
+                long custodyCountBefore =
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Evidence_Custody");
+
+                long catalogCountBefore =
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Catalog");
+
+                string sourceEvidenceRoot = Path.Combine(
+                    projectRoot,
+                    EvidenceCustodyService.SourceEvidenceDirectoryName);
+
+                int custodyDirectoryCountBefore =
+                    Directory.GetDirectories(sourceEvidenceRoot).Length;
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => service.Intake(
+                            projectRoot,
+                            request));
+
+                Assert.AreEqual(
+                    "SAFE-STOP: This Production Source Evidence is already in governed custody.",
+                    exception.Message);
+
+                Assert.AreEqual(
+                    custodyCountBefore,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Evidence_Custody"));
+
+                Assert.AreEqual(
+                    catalogCountBefore,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Catalog"));
+
+                Assert.HasCount(
+      custodyDirectoryCountBefore,
+      Directory.GetDirectories(sourceEvidenceRoot));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(testRoot);
+            }
+        }
+        [TestMethod]
+        public void Intake_RenamedIdenticalProductionSource_SafeStopsBeforeSecondCustody()
+        {
+            string testRoot = CreateTemporaryTestRoot();
+            string projectRoot = Path.Combine(
+                testRoot,
+                "Project");
+
+            string sourceDirectory = Path.Combine(
+                testRoot,
+                "Original");
+
+            Directory.CreateDirectory(sourceDirectory);
+
+            byte[] identicalBytes =
+                "HLAS renamed identical Production Source Evidence."u8.ToArray();
+
+            string firstSourcePath = Path.Combine(
+                sourceDirectory,
+                "Production Source A.txt");
+
+            string renamedSourcePath = Path.Combine(
+                sourceDirectory,
+                "Production Source Renamed.txt");
+
+            File.WriteAllBytes(
+                firstSourcePath,
+                identicalBytes);
+
+            File.WriteAllBytes(
+                renamedSourcePath,
+                identicalBytes);
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(projectRoot);
+
+                ProjectManifest manifest =
+                    ProjectPackageReader.Open(projectRoot);
+
+                ProductionSourceEvidenceIntakeService service = new(
+                    new RealEvidenceCustodyGateway());
+
+                ProductionSourceEvidenceIntakeRequest firstRequest = new(
+                    manifest.ProjectId,
+                    UserId.CreateNew(),
+                    ProjectRole.Admin,
+                    SeriesId.V,
+                    firstSourcePath);
+
+                _ = service.Intake(
+                    projectRoot,
+                    firstRequest);
+
+                long custodyCountBefore =
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Evidence_Custody");
+
+                long catalogCountBefore =
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Catalog");
+
+                string sourceEvidenceRoot = Path.Combine(
+                    projectRoot,
+                    EvidenceCustodyService.SourceEvidenceDirectoryName);
+
+                int custodyDirectoryCountBefore =
+                    Directory.GetDirectories(sourceEvidenceRoot).Length;
+
+                ProductionSourceEvidenceIntakeRequest renamedRequest = new(
+                    manifest.ProjectId,
+                    UserId.CreateNew(),
+                    ProjectRole.Admin,
+                    SeriesId.V,
+                    renamedSourcePath);
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => service.Intake(
+                            projectRoot,
+                            renamedRequest));
+
+                Assert.AreEqual(
+                    "SAFE-STOP: This Production Source Evidence is already in governed custody.",
+                    exception.Message);
+
+                Assert.AreEqual(
+                    custodyCountBefore,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Evidence_Custody"));
+
+                Assert.AreEqual(
+                    catalogCountBefore,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Catalog"));
+
+                Assert.HasCount(
+                    custodyDirectoryCountBefore,
+                    Directory.GetDirectories(sourceEvidenceRoot));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(testRoot);
+            }
+        }
         private sealed class RealEvidenceCustodyGateway
-            : IEvidenceCustodyGateway
+    : IProductionSourceEvidenceIntakeGateway
         {
             public EvidenceCustodyRecord Accept(
                 string projectRoot,
                 string sourceFilePath)
             {
-                return EvidenceCustodyService.Accept(
+                return ProductionSourceEvidenceIntakeGateway.Accept(
                     projectRoot,
                     sourceFilePath);
             }
 
-            public EvidenceCustodyRetrievalResult Retrieve(
-    string projectRoot,
-    EvidenceId evidenceId)
-            {
-                EvidenceCustodyRetrievedFile retrieved =
-                    EvidenceCustodyRetrievalService.Retrieve(
-                        projectRoot,
-                        evidenceId);
-
-                return new EvidenceCustodyRetrievalResult(
-                    retrieved.EvidenceRecord,
-                    retrieved.ControlledFilePath);
-            }
+                        
         }
 
         private static string CreateTemporaryTestRoot()
@@ -130,7 +317,35 @@ namespace HLAS.Tests
 
             return testRoot;
         }
+        private static long ReadRecordCount(
+    string projectRoot,
+    string tableName)
+        {
+            string databasePath = Path.Combine(
+                projectRoot,
+                ProjectPackageCreator.DatabaseFileName);
 
+            SqliteConnectionStringBuilder builder = new()
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false
+            };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.CommandText =
+                $"SELECT COUNT(*) FROM {tableName};";
+
+            return Convert.ToInt64(
+                command.ExecuteScalar());
+        }
         private static void DeleteTemporaryTestRoot(
             string testRoot)
         {

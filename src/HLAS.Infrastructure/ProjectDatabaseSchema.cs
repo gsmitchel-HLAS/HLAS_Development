@@ -6,10 +6,12 @@ namespace HLAS.Infrastructure
 {
     public static class ProjectDatabaseSchema
     {
-        public const int CurrentDatabaseSchemaVersion = 3;
-
         public const int Version1 = 1;
         public const int Version2 = 2;
+        public const int Version3 = 3;
+        public const int Version4 = 4;
+
+        public const int CurrentDatabaseSchemaVersion = Version4;
 
         public static void InitializeNewDatabase(
             SqliteConnection connection,
@@ -35,6 +37,10 @@ namespace HLAS.Infrastructure
                 transaction);
 
             CreateGovernedOperationsTable(
+                connection,
+                transaction);
+
+            CreateSourceEvidenceCatalogTable(
                 connection,
                 transaction);
 
@@ -124,7 +130,36 @@ namespace HLAS.Infrastructure
                 connection,
                 transaction,
                 Version2,
-                CurrentDatabaseSchemaVersion);
+                Version3);
+        }
+
+        public static void MigrateVersion3ToVersion4(
+            SqliteConnection connection,
+            SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version3)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 3 to Version 4 migration requires database schema version 3.");
+            }
+
+            CreateSourceEvidenceCatalogTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version3,
+                Version4);
         }
 
         private static void CreateProjectMetadataTable(
@@ -249,6 +284,32 @@ namespace HLAS.Infrastructure
                             AND Reason IS NOT NULL
                         )
                     )
+                );
+                """;
+
+            command.ExecuteNonQuery();
+        }
+
+        private static void CreateSourceEvidenceCatalogTable(
+            SqliteConnection connection,
+            SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+                CREATE TABLE HLAS_Source_Evidence_Catalog
+                (
+                    EvidenceId TEXT NOT NULL
+                        PRIMARY KEY,
+                    SourceClass TEXT NOT NULL
+                        CHECK (length(trim(SourceClass)) > 0),
+                    CatalogedUtc TEXT NOT NULL,
+
+                    FOREIGN KEY (EvidenceId)
+                        REFERENCES HLAS_Evidence_Custody(EvidenceId)
                 );
                 """;
 

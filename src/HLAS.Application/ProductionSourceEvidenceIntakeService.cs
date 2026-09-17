@@ -4,14 +4,16 @@ namespace HLAS.Application
 {
     public sealed class ProductionSourceEvidenceIntakeService
     {
-        private readonly IEvidenceCustodyGateway _evidenceCustodyGateway;
+        private readonly IProductionSourceEvidenceIntakeGateway
+            _productionIntakeGateway;
 
         public ProductionSourceEvidenceIntakeService(
-            IEvidenceCustodyGateway evidenceCustodyGateway)
+            IProductionSourceEvidenceIntakeGateway productionIntakeGateway)
         {
-            ArgumentNullException.ThrowIfNull(evidenceCustodyGateway);
+            ArgumentNullException.ThrowIfNull(productionIntakeGateway);
 
-            _evidenceCustodyGateway = evidenceCustodyGateway;
+            _productionIntakeGateway =
+                productionIntakeGateway;
         }
 
         public ProductionSourceEvidenceIntakeResult Intake(
@@ -28,7 +30,7 @@ namespace HLAS.Application
             }
 
             EvidenceCustodyRecord evidenceRecord =
-                _evidenceCustodyGateway.Accept(
+                _productionIntakeGateway.Accept(
                     projectRoot,
                     request.SelectedSourceFilePath);
 

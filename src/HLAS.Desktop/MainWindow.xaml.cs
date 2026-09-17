@@ -29,7 +29,7 @@ namespace HLAS.Desktop
 
             _productionIntakeService =
                 new ProductionSourceEvidenceIntakeService(
-                    new EvidenceCustodyGatewayAdapter());
+             new ProductionSourceEvidenceIntakeGatewayAdapter());
 
             _productionRetrievalService =
     new ProductionSourceEvidenceRetrievalService(
@@ -129,68 +129,68 @@ namespace HLAS.Desktop
             }
         }
 
-        private void ViewProductionSourceButton_Click(
-      object sender,
-      RoutedEventArgs e)
-        {
-            try
+      private void ViewProductionSourceButton_Click(
+    object sender,
+    RoutedEventArgs e)
+{
+    try
+    {
+        EvidenceId evidenceId =
+            _lastProductionEvidenceId
+            ?? throw new InvalidOperationException(
+                "No developmental Production Source Evidence has been accepted in this session.");
+
+        ProjectId projectId =
+            _context.ProjectId
+            ?? throw new InvalidOperationException(
+                "Developmental ProjectId is not available.");
+
+        UserId userId =
+            _context.UserId
+            ?? throw new InvalidOperationException(
+                "Developmental UserId is not available.");
+
+        ProjectRole projectRole =
+            _context.ProjectRole
+            ?? throw new InvalidOperationException(
+                "Developmental ProjectRole is not available.");
+
+        SeriesId seriesId =
+            _context.SeriesId
+            ?? throw new InvalidOperationException(
+                "Developmental SeriesId is not available.");
+
+        ProductionSourceEvidenceRetrievalRequest request =
+            new(
+                projectId,
+                userId,
+                projectRole,
+                seriesId,
+                evidenceId);
+
+        EvidenceCustodyRetrievalResult result =
+            _productionRetrievalService.Retrieve(
+                _developmentalSession.ProjectRoot,
+                request);
+
+        Process.Start(
+            new ProcessStartInfo
             {
-                EvidenceId evidenceId =
-                    _lastProductionEvidenceId
-                    ?? throw new InvalidOperationException(
-                        "No developmental Production Source Evidence has been accepted in this session.");
+                FileName = result.ControlledFilePath,
+                UseShellExecute = true
+            });
 
-                ProjectId projectId =
-                    _context.ProjectId
-                    ?? throw new InvalidOperationException(
-                        "Developmental ProjectId is not available.");
-
-                UserId userId =
-                    _context.UserId
-                    ?? throw new InvalidOperationException(
-                        "Developmental UserId is not available.");
-
-                ProjectRole projectRole =
-                    _context.ProjectRole
-                    ?? throw new InvalidOperationException(
-                        "Developmental ProjectRole is not available.");
-
-                SeriesId seriesId =
-                    _context.SeriesId
-                    ?? throw new InvalidOperationException(
-                        "Developmental SeriesId is not available.");
-
-                ProductionSourceEvidenceRetrievalRequest request =
-                    new(
-                        projectId,
-                        userId,
-                        projectRole,
-                        seriesId,
-                        evidenceId);
-
-                EvidenceCustodyRetrievalResult result =
-                    _productionRetrievalService.Retrieve(
-                        _developmentalSession.ProjectRoot,
-                        request);
-
-                Process.Start(
-                    new ProcessStartInfo
-                    {
-                        FileName = result.ControlledFilePath,
-                        UseShellExecute = true
-                    });
-
-                CommandResultText.Text =
-                    $"Developmental Production Source Evidence retrieval completed.\n" +
-                    $"Evidence ID: {result.EvidenceRecord.EvidenceId}\n" +
-                    $"Controlled file: {result.ControlledFilePath}";
-            }
-            catch (Exception ex)
-            {
-                CommandResultText.Text =
-                    $"Developmental Production Source retrieval failed: {ex.Message}";
-            }
-        }
+        CommandResultText.Text =
+            $"Developmental Production Source Evidence retrieval completed.\n" +
+            $"Evidence ID: {result.EvidenceRecord.EvidenceId}\n" +
+            $"Controlled file: {result.ControlledFilePath}";
+    }
+    catch (Exception ex)
+    {
+        CommandResultText.Text =
+            $"Developmental Production Source retrieval failed: {ex.Message}";
+    }
+}
         protected override void OnClosed(EventArgs e)
         {
             _developmentalSession.Dispose();

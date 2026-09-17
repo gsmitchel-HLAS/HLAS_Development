@@ -61,7 +61,7 @@ namespace HLAS.Tests
         }
 
         private sealed class FakeEvidenceCustodyGateway
-            : IEvidenceCustodyGateway
+    : IProductionSourceEvidenceIntakeGateway
         {
             private readonly EvidenceCustodyRecord _record;
 
@@ -83,15 +83,6 @@ namespace HLAS.Tests
                 ReceivedSourceFilePath = sourceFilePath;
 
                 return _record;
-            }
-
-
-            public EvidenceCustodyRetrievalResult Retrieve(
-        string projectRoot,
-        EvidenceId evidenceId)
-            {
-                throw new System.NotSupportedException(
-                    "Retrieval is not used by this intake-service test.");
             }
         }
     }
