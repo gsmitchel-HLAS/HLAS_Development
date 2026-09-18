@@ -10,9 +10,9 @@ namespace HLAS.Infrastructure
         public const int Version2 = 2;
         public const int Version3 = 3;
         public const int Version4 = 4;
+        public const int Version5 = 5;
 
-        public const int CurrentDatabaseSchemaVersion = Version4;
-
+        public const int CurrentDatabaseSchemaVersion = Version5;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -43,6 +43,10 @@ namespace HLAS.Infrastructure
             CreateSourceEvidenceCatalogTable(
                 connection,
                 transaction);
+
+            CreateProjectAuthorizationTable(
+    connection,
+    transaction);
 
             using SqliteCommand insertMetadata =
                 connection.CreateCommand();
@@ -161,7 +165,64 @@ namespace HLAS.Infrastructure
                 Version3,
                 Version4);
         }
+        public static void MigrateVersion4ToVersion5(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
 
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version4)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 4 to Version 5 migration requires database schema version 4.");
+            }
+
+            CreateProjectAuthorizationTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version4,
+                Version5);
+        }
+        private static void CreateProjectAuthorizationTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Project_Authorization
+        (
+            UserId TEXT NOT NULL
+                PRIMARY KEY,
+            ProjectRole TEXT NOT NULL
+                CHECK
+                (
+                    ProjectRole IN
+                    (
+                        'Technician',
+                        'Senior',
+                        'Admin'
+                    )
+                ),
+            AuthorizedUtc TEXT NOT NULL
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
         private static void CreateProjectMetadataTable(
             SqliteConnection connection,
             SqliteTransaction transaction)

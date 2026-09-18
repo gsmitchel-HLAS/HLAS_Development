@@ -27,14 +27,19 @@ namespace HLAS.Application
             ArgumentNullException.ThrowIfNull(gateway);
             _gateway = gateway;
         }
-
         public DevelopmentalProjectHistoryProofResult Execute(
-            string projectRoot,
-            UserId userId,
-            SeriesId seriesId,
-            ProjectRole projectRole)
+    string projectRoot,
+    AuthorizedProjectIdentity authorizedIdentity,
+    SeriesId seriesId)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+            ArgumentNullException.ThrowIfNull(authorizedIdentity);
+
+            if (seriesId != SeriesId.V)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Developmental project-history proof is permitted only in V-series.");
+            }
 
             DecisionRecord decisionRecord = new(
                 "DEVELOPMENTAL PROJECT HISTORY PROOF",
@@ -42,10 +47,13 @@ namespace HLAS.Application
 
             return _gateway.Execute(
                 projectRoot,
-                userId,
+                authorizedIdentity.UserId,
                 seriesId,
-                projectRole,
+                authorizedIdentity.ProjectRole,
                 decisionRecord);
         }
+        
+        
+            
     }
 }

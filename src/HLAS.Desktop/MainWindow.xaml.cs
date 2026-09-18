@@ -215,33 +215,8 @@ namespace HLAS.Desktop
 
             try
             {
-                UserId userId =
-                    _context.UserId
-                    ?? throw new InvalidOperationException(
-                        "Developmental UserId is not available.");
-
-                ProjectRole projectRole =
-                    _context.ProjectRole
-                    ?? throw new InvalidOperationException(
-                        "Developmental ProjectRole is not available.");
-
-                SeriesId seriesId =
-                    _context.SeriesId
-                    ?? throw new InvalidOperationException(
-                        "Developmental SeriesId is not available.");
-
-                DevelopmentalProjectHistoryProofResult result =
-                    _projectHistoryProofService.Execute(
-                        dialog.FolderName,
-                        userId,
-                        seriesId,
-                        projectRole);
-
-                CommandResultText.Text =
-                    $"Persistent developmental project-history proof completed.\n" +
-                    $"Project ID: {result.ProjectId}\n" +
-                    $"Operation ID: {result.OperationId}\n" +
-                    $"Project root: {result.ProjectRoot}";
+                throw new InvalidOperationException(
+    "SAFE-STOP: Persistent developmental project-history proof now requires authenticated project authorization.");
             }
             catch (Exception ex)
             {

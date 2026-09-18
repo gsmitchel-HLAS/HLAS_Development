@@ -23,16 +23,32 @@ namespace HLAS.Tests
 
                 UserId userId =
                     UserId.CreateNew();
+                ProjectAuthorizationStore.AddAuthorization(
+    projectRoot,
+    userId,
+    ProjectRole.Admin);
 
+                AuthenticatedIdentity authenticatedIdentity =
+                    new AuthenticationService(
+                        new TestAuthenticationGateway(
+                            AuthenticationGatewayResult.Succeeded(userId)))
+                    .Authenticate();
+
+                ProjectAuthorizationService authorizationService =
+                    new(new StoredProjectAuthorizationGateway());
+
+                AuthorizedProjectIdentity authorizedIdentity =
+                    authorizationService.Authorize(
+                        projectRoot,
+                        authenticatedIdentity);
                 DevelopmentalProjectHistoryProofService service = new(
                     new RealDevelopmentalProjectHistoryProofGateway());
 
                 DevelopmentalProjectHistoryProofResult result =
                     service.Execute(
-                        projectRoot,
-                        userId,
-                        SeriesId.V,
-                        ProjectRole.Admin);
+    projectRoot,
+    authorizedIdentity,
+    SeriesId.V);
 
                 Assert.AreEqual(
                     manifest.ProjectId,
@@ -131,7 +147,42 @@ namespace HLAS.Tests
                 DeleteTemporaryProjectRoot(projectRoot);
             }
         }
+        private sealed class TestAuthenticationGateway
+    : IAuthenticationGateway
+        {
+            private readonly AuthenticationGatewayResult _result;
 
+            public TestAuthenticationGateway(
+                AuthenticationGatewayResult result)
+            {
+                _result = result;
+            }
+
+            public AuthenticationGatewayResult Authenticate()
+            {
+                return _result;
+            }
+        }
+
+        private sealed class StoredProjectAuthorizationGateway
+            : IProjectAuthorizationGateway
+        {
+            public ProjectAuthorizationGatewayResult Resolve(
+                string projectRoot,
+                UserId userId)
+            {
+                ProjectRole? role =
+                    ProjectAuthorizationStore.ResolveRole(
+                        projectRoot,
+                        userId);
+
+                return role is null
+                    ? ProjectAuthorizationGatewayResult.Rejected(
+                        "User is not authorized for this project.")
+                    : ProjectAuthorizationGatewayResult.Authorized(
+                        role.Value);
+            }
+        }
         private sealed class RealDevelopmentalProjectHistoryProofGateway
             : IDevelopmentalProjectHistoryProofGateway
         {
