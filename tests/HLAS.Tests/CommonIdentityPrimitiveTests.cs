@@ -22,7 +22,13 @@ namespace HLAS.Tests
 
             Assert.AreNotEqual(Guid.Empty, id.Value);
         }
+        [TestMethod]
+        public void FreezeId_CreateNew_IsNotEmpty()
+        {
+            FreezeId id = FreezeId.CreateNew();
 
+            Assert.AreNotEqual(Guid.Empty, id.Value);
+        }
         [TestMethod]
         public void UserId_CreateNew_IsNotEmpty()
         {

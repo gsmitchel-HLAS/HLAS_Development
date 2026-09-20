@@ -11,8 +11,9 @@ namespace HLAS.Infrastructure
         public const int Version3 = 3;
         public const int Version4 = 4;
         public const int Version5 = 5;
+        public const int Version6 = 6;
 
-        public const int CurrentDatabaseSchemaVersion = Version5;
+        public const int CurrentDatabaseSchemaVersion = Version6;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -47,7 +48,9 @@ namespace HLAS.Infrastructure
             CreateProjectAuthorizationTable(
     connection,
     transaction);
-
+            CreateFrozenStatesTable(
+    connection,
+    transaction);
             using SqliteCommand insertMetadata =
                 connection.CreateCommand();
 
@@ -192,6 +195,72 @@ namespace HLAS.Infrastructure
                 transaction,
                 Version4,
                 Version5);
+        }
+        public static void MigrateVersion5ToVersion6(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version5)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 5 to Version 6 migration requires database schema version 5.");
+            }
+
+            CreateFrozenStatesTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version5,
+                Version6);
+        }
+
+        private static void CreateFrozenStatesTable(
+            SqliteConnection connection,
+            SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Frozen_States
+        (
+            FreezeId TEXT NOT NULL
+                PRIMARY KEY,
+            OperationId TEXT NOT NULL,
+            TargetEvidenceId TEXT NOT NULL,
+            FreezeType TEXT NOT NULL
+                CHECK (FreezeType = 'PRE-CHANGE'),
+            RelativeFreezePath TEXT NOT NULL
+                UNIQUE
+                CHECK (length(trim(RelativeFreezePath)) > 0),
+            FileSizeBytes INTEGER NOT NULL
+                CHECK (FileSizeBytes >= 0),
+            Sha256Hex TEXT NOT NULL
+                CHECK (length(Sha256Hex) = 64),
+            FrozenUtc TEXT NOT NULL,
+
+            FOREIGN KEY (OperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId),
+
+            FOREIGN KEY (TargetEvidenceId)
+                REFERENCES HLAS_Evidence_Custody(EvidenceId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
         }
         private static void CreateProjectAuthorizationTable(
     SqliteConnection connection,

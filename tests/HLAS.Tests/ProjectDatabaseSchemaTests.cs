@@ -11,7 +11,7 @@ namespace HLAS.Tests
     public sealed class ProjectDatabaseSchemaTests
     {
         [TestMethod]
-        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion5AndCurrentTables()
+        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion6AndCurrentTables()
         {
             string databasePath = CreateTemporaryDatabasePath();
 
@@ -60,6 +60,10 @@ Assert.IsTrue(
     TableExists(
         connection,
         "HLAS_Project_Authorization"));
+                Assert.IsTrue(
+    TableExists(
+        connection,
+        "HLAS_Frozen_States"));
             }
             finally
             {
@@ -741,13 +745,216 @@ Assert.IsTrue(
                 migrationTransaction.Rollback();
 
                 Assert.AreEqual(
-                    ProjectDatabaseSchema.Version5,
+                  ProjectDatabaseSchema.CurrentDatabaseSchemaVersion,
                     ReadDatabaseSchemaVersion(connection));
 
                 Assert.IsTrue(
                     TableExists(
                         connection,
                         "HLAS_Project_Authorization"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion5ToVersion6_CommittedTransaction_AdvancesSchema()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion2Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction version3Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion2ToVersion3(
+                        connection,
+                        version3Transaction);
+
+                    version3Transaction.Commit();
+                }
+
+                using (SqliteTransaction version4Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion3ToVersion4(
+                        connection,
+                        version4Transaction);
+
+                    version4Transaction.Commit();
+                }
+
+                using (SqliteTransaction version5Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion4ToVersion5(
+                        connection,
+                        version5Transaction);
+
+                    version5Transaction.Commit();
+                }
+
+                using (SqliteTransaction version6Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion5ToVersion6(
+                        connection,
+                        version6Transaction);
+
+                    version6Transaction.Commit();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version6,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Frozen_States"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+
+        [TestMethod]
+        public void MigrateVersion5ToVersion6_RolledBackTransaction_LeavesVersion5()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion2Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction version3Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion2ToVersion3(
+                        connection,
+                        version3Transaction);
+
+                    version3Transaction.Commit();
+                }
+
+                using (SqliteTransaction version4Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion3ToVersion4(
+                        connection,
+                        version4Transaction);
+
+                    version4Transaction.Commit();
+                }
+
+                using (SqliteTransaction version5Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion4ToVersion5(
+                        connection,
+                        version5Transaction);
+
+                    version5Transaction.Commit();
+                }
+
+                using (SqliteTransaction version6Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion5ToVersion6(
+                        connection,
+                        version6Transaction);
+
+                    version6Transaction.Rollback();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version5,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Frozen_States"));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_Authorization"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+
+        [TestMethod]
+        public void MigrateVersion5ToVersion6_NonVersion5_SafeStops()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.InitializeNewDatabase(
+                        connection,
+                        transaction,
+                        ProjectId.CreateNew());
+
+                    transaction.Commit();
+                }
+
+                using SqliteTransaction migrationTransaction =
+                    connection.BeginTransaction();
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectDatabaseSchema.MigrateVersion5ToVersion6(
+                            connection,
+                            migrationTransaction));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                migrationTransaction.Rollback();
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.CurrentDatabaseSchemaVersion,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Frozen_States"));
             }
             finally
             {
