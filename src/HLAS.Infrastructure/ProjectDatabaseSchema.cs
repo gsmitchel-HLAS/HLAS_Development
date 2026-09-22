@@ -12,8 +12,8 @@ namespace HLAS.Infrastructure
         public const int Version4 = 4;
         public const int Version5 = 5;
         public const int Version6 = 6;
-
-        public const int CurrentDatabaseSchemaVersion = Version6;
+        public const int Version7 = 7;
+        public const int CurrentDatabaseSchemaVersion = Version7;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -44,11 +44,19 @@ namespace HLAS.Infrastructure
             CreateSourceEvidenceCatalogTable(
                 connection,
                 transaction);
-
+            AddSourceEvidenceCatalogLifecycleState(
+    connection,
+    transaction);
             CreateProjectAuthorizationTable(
     connection,
     transaction);
             CreateFrozenStatesTable(
+    connection,
+    transaction);
+            CreateSourceEvidenceMaintenanceTable(
+                connection,
+                transaction);
+            CreateSourceEvidenceMaintenanceChangesTable(
     connection,
     transaction);
             using SqliteCommand insertMetadata =
@@ -199,6 +207,7 @@ namespace HLAS.Infrastructure
         public static void MigrateVersion5ToVersion6(
     SqliteConnection connection,
     SqliteTransaction transaction)
+
         {
             ArgumentNullException.ThrowIfNull(connection);
             ArgumentNullException.ThrowIfNull(transaction);
@@ -224,7 +233,40 @@ namespace HLAS.Infrastructure
                 Version5,
                 Version6);
         }
+        public static void MigrateVersion6ToVersion7(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
 
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version6)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 6 to Version 7 migration requires database schema version 6.");
+            }
+
+            AddSourceEvidenceCatalogLifecycleState(
+    connection,
+    transaction);
+
+            CreateSourceEvidenceMaintenanceTable(
+                connection,
+                transaction);
+            CreateSourceEvidenceMaintenanceChangesTable(
+    connection,
+    transaction);
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version6,
+                Version7);
+        }
         private static void CreateFrozenStatesTable(
             SqliteConnection connection,
             SqliteTransaction transaction)
@@ -257,6 +299,96 @@ namespace HLAS.Infrastructure
 
             FOREIGN KEY (TargetEvidenceId)
                 REFERENCES HLAS_Evidence_Custody(EvidenceId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateSourceEvidenceMaintenanceTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Source_Evidence_Maintenance
+        (
+            OperationId TEXT NOT NULL
+                PRIMARY KEY,
+            FreezeId TEXT NOT NULL,
+            PriorEvidenceId TEXT NOT NULL,
+            ResultingEvidenceId TEXT NOT NULL,
+            MaintenanceType TEXT NOT NULL
+                CHECK
+                (
+                    MaintenanceType IN
+                    (
+                        'CORRECT',
+                        'REPLACE'
+                    )
+                ),
+            MaintainedUtc TEXT NOT NULL,
+
+            CHECK
+            (
+                (
+                    MaintenanceType = 'CORRECT'
+                    AND PriorEvidenceId = ResultingEvidenceId
+                )
+                OR
+                (
+                    MaintenanceType = 'REPLACE'
+                    AND PriorEvidenceId <> ResultingEvidenceId
+                )
+            ),
+
+            FOREIGN KEY (OperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId),
+
+            FOREIGN KEY (FreezeId)
+                REFERENCES HLAS_Frozen_States(FreezeId),
+
+            FOREIGN KEY (PriorEvidenceId)
+                REFERENCES HLAS_Evidence_Custody(EvidenceId),
+
+            FOREIGN KEY (ResultingEvidenceId)
+                REFERENCES HLAS_Evidence_Custody(EvidenceId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateSourceEvidenceMaintenanceChangesTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Source_Evidence_Maintenance_Changes
+        (
+            OperationId TEXT NOT NULL,
+            ChangeSequence INTEGER NOT NULL
+                CHECK (ChangeSequence > 0),
+            FieldName TEXT NOT NULL
+                CHECK (length(trim(FieldName)) > 0),
+            PriorValue TEXT,
+            ResultingValue TEXT,
+
+            PRIMARY KEY
+                (
+                    OperationId,
+                    ChangeSequence
+                ),
+
+            FOREIGN KEY (OperationId)
+                REFERENCES HLAS_Source_Evidence_Maintenance(OperationId)
         );
         """;
 
@@ -437,6 +569,7 @@ namespace HLAS.Infrastructure
                     SourceClass TEXT NOT NULL
                         CHECK (length(trim(SourceClass)) > 0),
                     CatalogedUtc TEXT NOT NULL,
+                
 
                     FOREIGN KEY (EvidenceId)
                         REFERENCES HLAS_Evidence_Custody(EvidenceId)
@@ -445,7 +578,31 @@ namespace HLAS.Infrastructure
 
             command.ExecuteNonQuery();
         }
+        private static void AddSourceEvidenceCatalogLifecycleState(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
 
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        ALTER TABLE HLAS_Source_Evidence_Catalog
+        ADD COLUMN LifecycleState TEXT NOT NULL
+            DEFAULT 'Active'
+            CHECK
+            (
+                LifecycleState IN
+                (
+                    'Active',
+                    'Superseded'
+                )
+            );
+        """;
+
+            command.ExecuteNonQuery();
+        }
         private static void UpdateDatabaseSchemaVersion(
             SqliteConnection connection,
             SqliteTransaction transaction,

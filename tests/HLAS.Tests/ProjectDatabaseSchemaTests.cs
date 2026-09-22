@@ -11,7 +11,7 @@ namespace HLAS.Tests
     public sealed class ProjectDatabaseSchemaTests
     {
         [TestMethod]
-        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion6AndCurrentTables()
+        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion7AndCurrentTables()
         {
             string databasePath = CreateTemporaryDatabasePath();
 
@@ -64,13 +64,143 @@ Assert.IsTrue(
     TableExists(
         connection,
         "HLAS_Frozen_States"));
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Maintenance"));
+                Assert.IsTrue(
+    TableExists(
+        connection,
+        "HLAS_Source_Evidence_Maintenance_Changes"));
             }
             finally
             {
                 DeleteTemporaryDatabase(databasePath);
             }
         }
+        [TestMethod]
+        public void SourceEvidenceCatalog_NewRow_DefaultsLifecycleStateToActive()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
 
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+                EvidenceId evidenceId = EvidenceId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.InitializeNewDatabase(
+                        connection,
+                        transaction,
+                        projectId);
+
+                    transaction.Commit();
+                }
+
+                using (SqliteCommand custodyCommand =
+                    connection.CreateCommand())
+                {
+                    custodyCommand.CommandText =
+                        """
+                INSERT INTO HLAS_Evidence_Custody
+                    (
+                        EvidenceId,
+                        OriginalFileName,
+                        RelativeCustodyPath,
+                        FileSizeBytes,
+                        Sha256Hex,
+                        AcceptedUtc
+                    )
+                VALUES
+                    (
+                        $evidenceId,
+                        'test.pdf',
+                        'HLAS_Source_Evidence/test.pdf',
+                        1,
+                        $sha256Hex,
+                        $acceptedUtc
+                    );
+                """;
+
+                    custodyCommand.Parameters.AddWithValue(
+                        "$evidenceId",
+                        evidenceId.Value.ToString("D"));
+
+                    custodyCommand.Parameters.AddWithValue(
+                        "$sha256Hex",
+                        new string('a', 64));
+
+                    custodyCommand.Parameters.AddWithValue(
+                        "$acceptedUtc",
+                        DateTimeOffset.UtcNow.ToString("O"));
+
+                    custodyCommand.ExecuteNonQuery();
+                }
+
+                using (SqliteCommand catalogCommand =
+                    connection.CreateCommand())
+                {
+                    catalogCommand.CommandText =
+                        """
+                INSERT INTO HLAS_Source_Evidence_Catalog
+                    (
+                        EvidenceId,
+                        SourceClass,
+                        CatalogedUtc
+                    )
+                VALUES
+                    (
+                        $evidenceId,
+                        'PRODUCTION',
+                        $catalogedUtc
+                    );
+                """;
+
+                    catalogCommand.Parameters.AddWithValue(
+                        "$evidenceId",
+                        evidenceId.Value.ToString("D"));
+
+                    catalogCommand.Parameters.AddWithValue(
+                        "$catalogedUtc",
+                        DateTimeOffset.UtcNow.ToString("O"));
+
+                    catalogCommand.ExecuteNonQuery();
+                }
+
+                using SqliteCommand readCommand =
+                    connection.CreateCommand();
+
+                readCommand.CommandText =
+                    """
+            SELECT LifecycleState
+            FROM HLAS_Source_Evidence_Catalog
+            WHERE EvidenceId = $evidenceId;
+            """;
+
+                readCommand.Parameters.AddWithValue(
+                    "$evidenceId",
+                    evidenceId.Value.ToString("D"));
+
+                string lifecycleState =
+                    Convert.ToString(
+                        readCommand.ExecuteScalar())!;
+
+                Assert.AreEqual(
+                    "Active",
+                    lifecycleState);
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
         [TestMethod]
         public void InitializeNewDatabase_RolledBackTransaction_LeavesNoSchema()
         {
@@ -955,6 +1085,546 @@ Assert.IsTrue(
                     TableExists(
                         connection,
                         "HLAS_Frozen_States"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion6ToVersion7_CommittedTransaction_AdvancesSchema()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion2Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction version3Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion2ToVersion3(
+                        connection,
+                        version3Transaction);
+
+                    version3Transaction.Commit();
+                }
+
+                using (SqliteTransaction version4Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion3ToVersion4(
+                        connection,
+                        version4Transaction);
+
+                    version4Transaction.Commit();
+                }
+
+                using (SqliteTransaction version5Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion4ToVersion5(
+                        connection,
+                        version5Transaction);
+
+                    version5Transaction.Commit();
+                }
+
+                using (SqliteTransaction version6Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion5ToVersion6(
+                        connection,
+                        version6Transaction);
+
+                    version6Transaction.Commit();
+                }
+
+                using (SqliteTransaction version7Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion6ToVersion7(
+                        connection,
+                        version7Transaction);
+
+                    version7Transaction.Commit();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version7,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Maintenance"));
+                Assert.IsTrue(
+    TableExists(
+        connection,
+        "HLAS_Source_Evidence_Maintenance_Changes"));
+
+                bool lifecycleStateFound = false;
+
+                using SqliteCommand command =
+                    connection.CreateCommand();
+
+                command.CommandText =
+                    "PRAGMA table_info(HLAS_Source_Evidence_Catalog);";
+
+                using SqliteDataReader reader =
+                    command.ExecuteReader();
+
+                while (reader.Read())
+                {
+                    if (string.Equals(
+                            reader.GetString(1),
+                            "LifecycleState",
+                            StringComparison.Ordinal))
+                    {
+                        lifecycleStateFound = true;
+                        break;
+                    }
+                }
+
+                Assert.IsTrue(lifecycleStateFound);
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion6ToVersion7_ExistingCatalogRow_DefaultsLifecycleStateToActive()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+                EvidenceId evidenceId = EvidenceId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion2Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion2ToVersion3(
+                        connection,
+                        transaction);
+
+                    transaction.Commit();
+                }
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion3ToVersion4(
+                        connection,
+                        transaction);
+
+                    transaction.Commit();
+                }
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion4ToVersion5(
+                        connection,
+                        transaction);
+
+                    transaction.Commit();
+                }
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion5ToVersion6(
+                        connection,
+                        transaction);
+
+                    transaction.Commit();
+                }
+
+                using (SqliteCommand custodyCommand =
+                    connection.CreateCommand())
+                {
+                    custodyCommand.CommandText =
+                        """
+                INSERT INTO HLAS_Evidence_Custody
+                    (
+                        EvidenceId,
+                        OriginalFileName,
+                        RelativeCustodyPath,
+                        FileSizeBytes,
+                        Sha256Hex,
+                        AcceptedUtc
+                    )
+                VALUES
+                    (
+                        $evidenceId,
+                        'existing.pdf',
+                        'HLAS_Source_Evidence/existing.pdf',
+                        1,
+                        $sha256Hex,
+                        $acceptedUtc
+                    );
+                """;
+
+                    custodyCommand.Parameters.AddWithValue(
+                        "$evidenceId",
+                        evidenceId.Value.ToString("D"));
+
+                    custodyCommand.Parameters.AddWithValue(
+                        "$sha256Hex",
+                        new string('a', 64));
+
+                    custodyCommand.Parameters.AddWithValue(
+                        "$acceptedUtc",
+                        DateTimeOffset.UtcNow.ToString("O"));
+
+                    custodyCommand.ExecuteNonQuery();
+                }
+
+                using (SqliteCommand catalogCommand =
+                    connection.CreateCommand())
+                {
+                    catalogCommand.CommandText =
+                        """
+                INSERT INTO HLAS_Source_Evidence_Catalog
+                    (
+                        EvidenceId,
+                        SourceClass,
+                        CatalogedUtc
+                    )
+                VALUES
+                    (
+                        $evidenceId,
+                        'PRODUCTION',
+                        $catalogedUtc
+                    );
+                """;
+
+                    catalogCommand.Parameters.AddWithValue(
+                        "$evidenceId",
+                        evidenceId.Value.ToString("D"));
+
+                    catalogCommand.Parameters.AddWithValue(
+                        "$catalogedUtc",
+                        DateTimeOffset.UtcNow.ToString("O"));
+
+                    catalogCommand.ExecuteNonQuery();
+                }
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion6ToVersion7(
+                        connection,
+                        transaction);
+
+                    transaction.Commit();
+                }
+
+                using SqliteCommand readCommand =
+                    connection.CreateCommand();
+
+                readCommand.CommandText =
+                    """
+            SELECT LifecycleState
+            FROM HLAS_Source_Evidence_Catalog
+            WHERE EvidenceId = $evidenceId;
+            """;
+
+                readCommand.Parameters.AddWithValue(
+                    "$evidenceId",
+                    evidenceId.Value.ToString("D"));
+
+                Assert.AreEqual(
+                    "Active",
+                    Convert.ToString(
+                        readCommand.ExecuteScalar()));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void SourceEvidenceCatalog_InvalidLifecycleState_IsRejected()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+                EvidenceId evidenceId = EvidenceId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.InitializeNewDatabase(
+                        connection,
+                        transaction,
+                        projectId);
+
+                    transaction.Commit();
+                }
+
+                using (SqliteCommand custodyCommand =
+                    connection.CreateCommand())
+                {
+                    custodyCommand.CommandText =
+                        """
+                INSERT INTO HLAS_Evidence_Custody
+                    (
+                        EvidenceId,
+                        OriginalFileName,
+                        RelativeCustodyPath,
+                        FileSizeBytes,
+                        Sha256Hex,
+                        AcceptedUtc
+                    )
+                VALUES
+                    (
+                        $evidenceId,
+                        'test.pdf',
+                        'HLAS_Source_Evidence/test.pdf',
+                        1,
+                        $sha256Hex,
+                        $acceptedUtc
+                    );
+                """;
+
+                    custodyCommand.Parameters.AddWithValue(
+                        "$evidenceId",
+                        evidenceId.Value.ToString("D"));
+
+                    custodyCommand.Parameters.AddWithValue(
+                        "$sha256Hex",
+                        new string('a', 64));
+
+                    custodyCommand.Parameters.AddWithValue(
+                        "$acceptedUtc",
+                        DateTimeOffset.UtcNow.ToString("O"));
+
+                    custodyCommand.ExecuteNonQuery();
+                }
+
+                using SqliteCommand catalogCommand =
+                    connection.CreateCommand();
+
+                catalogCommand.CommandText =
+                    """
+            INSERT INTO HLAS_Source_Evidence_Catalog
+                (
+                    EvidenceId,
+                    SourceClass,
+                    CatalogedUtc,
+                    LifecycleState
+                )
+            VALUES
+                (
+                    $evidenceId,
+                    'PRODUCTION',
+                    $catalogedUtc,
+                    'INVALID'
+                );
+            """;
+
+                catalogCommand.Parameters.AddWithValue(
+                    "$evidenceId",
+                    evidenceId.Value.ToString("D"));
+
+                catalogCommand.Parameters.AddWithValue(
+                    "$catalogedUtc",
+                    DateTimeOffset.UtcNow.ToString("O"));
+
+                Assert.ThrowsExactly<SqliteException>(
+                    () => catalogCommand.ExecuteNonQuery());
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion6ToVersion7_RolledBackTransaction_LeavesVersion6()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion2Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction version3Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion2ToVersion3(
+                        connection,
+                        version3Transaction);
+
+                    version3Transaction.Commit();
+                }
+
+                using (SqliteTransaction version4Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion3ToVersion4(
+                        connection,
+                        version4Transaction);
+
+                    version4Transaction.Commit();
+                }
+
+                using (SqliteTransaction version5Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion4ToVersion5(
+                        connection,
+                        version5Transaction);
+
+                    version5Transaction.Commit();
+                }
+
+                using (SqliteTransaction version6Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion5ToVersion6(
+                        connection,
+                        version6Transaction);
+
+                    version6Transaction.Commit();
+                }
+
+                using (SqliteTransaction version7Transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion6ToVersion7(
+                        connection,
+                        version7Transaction);
+
+                    version7Transaction.Rollback();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version6,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Maintenance"));
+                Assert.IsFalse(
+    TableExists(
+        connection,
+        "HLAS_Source_Evidence_Maintenance_Changes"));
+                bool lifecycleStateFound = false;
+
+                using SqliteCommand command =
+                    connection.CreateCommand();
+
+                command.CommandText =
+                    "PRAGMA table_info(HLAS_Source_Evidence_Catalog);";
+
+                using SqliteDataReader reader =
+                    command.ExecuteReader();
+
+                while (reader.Read())
+                {
+                    if (string.Equals(
+                            reader.GetString(1),
+                            "LifecycleState",
+                            StringComparison.Ordinal))
+                    {
+                        lifecycleStateFound = true;
+                        break;
+                    }
+                }
+
+                Assert.IsFalse(lifecycleStateFound);
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion6ToVersion7_NonVersion6_SafeStops()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.InitializeNewDatabase(
+                        connection,
+                        transaction,
+                        ProjectId.CreateNew());
+
+                    transaction.Commit();
+                }
+
+                using SqliteTransaction migrationTransaction =
+                    connection.BeginTransaction();
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectDatabaseSchema.MigrateVersion6ToVersion7(
+                            connection,
+                            migrationTransaction));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                migrationTransaction.Rollback();
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.CurrentDatabaseSchemaVersion,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Maintenance"));
             }
             finally
             {
