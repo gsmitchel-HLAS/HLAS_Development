@@ -13,7 +13,8 @@ namespace HLAS.Infrastructure
         public const int Version5 = 5;
         public const int Version6 = 6;
         public const int Version7 = 7;
-        public const int CurrentDatabaseSchemaVersion = Version7;
+        public const int Version8 = 8;
+        public const int CurrentDatabaseSchemaVersion = Version8;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -59,8 +60,13 @@ namespace HLAS.Infrastructure
             CreateSourceEvidenceMaintenanceChangesTable(
     connection,
     transaction);
+
+            CreateSourceEvidenceMetadataVersionsTable(
+                connection,
+                transaction);
+
             using SqliteCommand insertMetadata =
-                connection.CreateCommand();
+                            connection.CreateCommand();
 
             insertMetadata.Transaction = transaction;
             insertMetadata.CommandText =
@@ -267,6 +273,34 @@ namespace HLAS.Infrastructure
                 Version6,
                 Version7);
         }
+        public static void MigrateVersion7ToVersion8(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version7)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 7 to Version 8 migration requires database schema version 7.");
+            }
+
+            CreateSourceEvidenceMetadataVersionsTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version7,
+                Version8);
+        }
         private static void CreateFrozenStatesTable(
             SqliteConnection connection,
             SqliteTransaction transaction)
@@ -386,6 +420,85 @@ namespace HLAS.Infrastructure
                     OperationId,
                     ChangeSequence
                 ),
+
+            FOREIGN KEY (OperationId)
+                REFERENCES HLAS_Source_Evidence_Maintenance(OperationId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateSourceEvidenceMetadataVersionsTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Source_Evidence_Metadata_Versions
+        (
+            MetadataVersionId TEXT NOT NULL
+                PRIMARY KEY,
+            EvidenceId TEXT NOT NULL,
+            VersionNumber INTEGER NOT NULL
+                CHECK (VersionNumber > 0),
+            PriorMetadataVersionId TEXT NULL,
+            DisplayLabel TEXT NULL
+                CHECK
+                (
+                    DisplayLabel IS NULL
+                    OR length(trim(DisplayLabel)) > 0
+                ),
+            AdministrativeDescription TEXT NULL
+                CHECK
+                (
+                    AdministrativeDescription IS NULL
+                    OR length(trim(AdministrativeDescription)) > 0
+                ),
+            CorrectionReason TEXT NOT NULL
+                CHECK (length(trim(CorrectionReason)) > 0),
+            OperationId TEXT NOT NULL
+                UNIQUE,
+            VersionedUtc TEXT NOT NULL,
+
+            CHECK
+            (
+                (
+                    VersionNumber = 1
+                    AND PriorMetadataVersionId IS NULL
+                )
+                OR
+                (
+                    VersionNumber > 1
+                    AND PriorMetadataVersionId IS NOT NULL
+                )
+            ),
+
+            CHECK
+            (
+                PriorMetadataVersionId IS NULL
+                OR PriorMetadataVersionId <> MetadataVersionId
+            ),
+
+            UNIQUE
+            (
+                EvidenceId,
+                VersionNumber
+            ),
+
+            UNIQUE
+            (
+                PriorMetadataVersionId
+            ),
+
+            FOREIGN KEY (EvidenceId)
+                REFERENCES HLAS_Source_Evidence_Catalog(EvidenceId),
+
+            FOREIGN KEY (PriorMetadataVersionId)
+                REFERENCES HLAS_Source_Evidence_Metadata_Versions(MetadataVersionId),
 
             FOREIGN KEY (OperationId)
                 REFERENCES HLAS_Source_Evidence_Maintenance(OperationId)
