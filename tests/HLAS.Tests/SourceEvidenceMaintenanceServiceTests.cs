@@ -33,9 +33,9 @@ namespace HLAS.Tests
                 new List<SourceEvidenceCorrectionChange>
                 {
                     new(
-                        "OriginalFileName",
-                        "old.pdf",
-                        "corrected.pdf")
+                 "Corrected display label",
+"Corrected administrative description",
+"Correction requested by authorized user"       )
                 };
 
             FakeMaintenanceGateway gateway =
@@ -99,9 +99,9 @@ namespace HLAS.Tests
                         new List<SourceEvidenceCorrectionChange>
                         {
                     new(
-                        "OriginalFileName",
-                        "old.pdf",
-                        "corrected.pdf")
+                        "Corrected display label",
+"Corrected administrative description",
+"Correction requested by authorized user")
                         }));
 
             StringAssert.Contains(
@@ -147,9 +147,9 @@ namespace HLAS.Tests
                 new List<SourceEvidenceCorrectionChange>
                 {
             new(
-                "OriginalFileName",
-                "old.pdf",
-                "corrected.pdf")
+                "Corrected display label",
+"Corrected administrative description",
+"Correction requested by authorized user")
                 });
 
             Assert.IsTrue(gateway.CorrectCalled);
@@ -192,9 +192,9 @@ namespace HLAS.Tests
                         new List<SourceEvidenceCorrectionChange>
                         {
                     new(
-                        "OriginalFileName",
-                        "old.pdf",
-                        "corrected.pdf")
+                        "Corrected display label",
+"Corrected administrative description",
+"Correction requested by authorized user")
                         }));
 
             StringAssert.Contains(
@@ -239,9 +239,9 @@ namespace HLAS.Tests
                         new List<SourceEvidenceCorrectionChange>
                         {
                     new(
-                        "OriginalFileName",
-                        "old.pdf",
-                        "corrected.pdf")
+                        "Corrected display label",
+"Corrected administrative description",
+"Correction requested by authorized user")
                         }));
 
             StringAssert.Contains(
