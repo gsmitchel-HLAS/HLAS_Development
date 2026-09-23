@@ -9,7 +9,7 @@ namespace HLAS.Application
             string projectRoot,
             AuthorizedProjectIdentity authorizedIdentity,
             EvidenceId evidenceId,
-            IReadOnlyList<SourceEvidenceCorrectionChange> changes);
+            SourceEvidenceCorrectionChange change);
 
         SourceEvidenceMaintenanceRecord Replace(
             string projectRoot,

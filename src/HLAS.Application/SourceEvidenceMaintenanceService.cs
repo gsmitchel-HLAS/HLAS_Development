@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+﻿
 using HLAS.Domain;
 
 namespace HLAS.Application
@@ -24,12 +24,11 @@ namespace HLAS.Application
             AuthenticatedIdentity authenticatedIdentity,
             SeriesId seriesId,
             EvidenceId evidenceId,
-            IReadOnlyList<SourceEvidenceCorrectionChange> changes)
+          SourceEvidenceCorrectionChange change)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
             ArgumentNullException.ThrowIfNull(authenticatedIdentity);
-            ArgumentNullException.ThrowIfNull(changes);
-
+            ArgumentNullException.ThrowIfNull(change);
             VerifyVSeries(seriesId);
 
             AuthorizedProjectIdentity authorizedIdentity =
@@ -44,7 +43,7 @@ namespace HLAS.Application
                 projectRoot,
                 authorizedIdentity,
                 evidenceId,
-                changes);
+                change);
         }
 
         public SourceEvidenceMaintenanceRecord Replace(

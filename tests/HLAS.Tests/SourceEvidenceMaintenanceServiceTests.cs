@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
+
 using HLAS.Application;
 using HLAS.Domain;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -29,14 +29,11 @@ namespace HLAS.Tests
             EvidenceId evidenceId =
                 EvidenceId.CreateNew();
 
-            IReadOnlyList<SourceEvidenceCorrectionChange> changes =
-                new List<SourceEvidenceCorrectionChange>
-                {
-                    new(
-                 "Corrected display label",
-"Corrected administrative description",
-"Correction requested by authorized user"       )
-                };
+            SourceEvidenceCorrectionChange change =
+    new(
+        "Corrected display label",
+        "Corrected administrative description",
+        "Correction requested by authorized user");
 
             FakeMaintenanceGateway gateway =
                 new();
@@ -51,7 +48,7 @@ namespace HLAS.Tests
                 authenticatedIdentity,
                 SeriesId.V,
                 evidenceId,
-                changes);
+                change);
 
             Assert.IsTrue(gateway.CorrectCalled);
             Assert.AreEqual(
@@ -96,13 +93,11 @@ namespace HLAS.Tests
                         authenticatedIdentity,
                         SeriesId.V,
                         EvidenceId.CreateNew(),
-                        new List<SourceEvidenceCorrectionChange>
-                        {
-                    new(
-                        "Corrected display label",
-"Corrected administrative description",
-"Correction requested by authorized user")
-                        }));
+                   new SourceEvidenceCorrectionChange(
+    "Corrected display label",
+    "Corrected administrative description",
+    "Correction requested by authorized user")
+             ));
 
             StringAssert.Contains(
                 exception.Message,
@@ -144,13 +139,11 @@ namespace HLAS.Tests
                 authenticatedIdentity,
                 SeriesId.V,
                 evidenceId,
-                new List<SourceEvidenceCorrectionChange>
-                {
-            new(
-                "Corrected display label",
-"Corrected administrative description",
-"Correction requested by authorized user")
-                });
+              new SourceEvidenceCorrectionChange(
+    "Corrected display label",
+    "Corrected administrative description",
+    "Correction requested by authorized user")
+             );
 
             Assert.IsTrue(gateway.CorrectCalled);
             Assert.AreEqual(
@@ -189,13 +182,11 @@ namespace HLAS.Tests
                         authenticatedIdentity,
                         SeriesId.A,
                         EvidenceId.CreateNew(),
-                        new List<SourceEvidenceCorrectionChange>
-                        {
-                    new(
-                        "Corrected display label",
-"Corrected administrative description",
-"Correction requested by authorized user")
-                        }));
+                new SourceEvidenceCorrectionChange(
+    "Corrected display label",
+    "Corrected administrative description",
+    "Correction requested by authorized user")
+               ));
 
             StringAssert.Contains(
                 exception.Message,
@@ -236,13 +227,11 @@ namespace HLAS.Tests
                         authenticatedIdentity,
                         SeriesId.V,
                         EvidenceId.CreateNew(),
-                        new List<SourceEvidenceCorrectionChange>
-                        {
-                    new(
-                        "Corrected display label",
-"Corrected administrative description",
-"Correction requested by authorized user")
-                        }));
+                      new SourceEvidenceCorrectionChange(
+    "Corrected display label",
+    "Corrected administrative description",
+    "Correction requested by authorized user")
+             ));
 
             StringAssert.Contains(
                 exception.Message,
@@ -364,7 +353,7 @@ namespace HLAS.Tests
                 string projectRoot,
                 AuthorizedProjectIdentity authorizedIdentity,
                 EvidenceId evidenceId,
-                IReadOnlyList<SourceEvidenceCorrectionChange> changes)
+                SourceEvidenceCorrectionChange change)
             {
                 CorrectCalled = true;
                 ReceivedAuthorizedIdentity = authorizedIdentity;
