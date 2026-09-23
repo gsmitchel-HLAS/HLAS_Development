@@ -31,8 +31,8 @@ namespace HLAS.Tests
 
             SourceEvidenceCorrectionChange change =
     new(
-        "Corrected display label",
-        "Corrected administrative description",
+        SourceEvidenceMetadataFieldChange.Set("Corrected display label"),
+        SourceEvidenceMetadataFieldChange.Set("Corrected administrative description"),
         "Correction requested by authorized user");
 
             FakeMaintenanceGateway gateway =
@@ -94,8 +94,8 @@ namespace HLAS.Tests
                         SeriesId.V,
                         EvidenceId.CreateNew(),
                    new SourceEvidenceCorrectionChange(
-    "Corrected display label",
-    "Corrected administrative description",
+    SourceEvidenceMetadataFieldChange.Set("Corrected display label"),
+    SourceEvidenceMetadataFieldChange.Set("Corrected administrative description"),
     "Correction requested by authorized user")
              ));
 
@@ -140,8 +140,8 @@ namespace HLAS.Tests
                 SeriesId.V,
                 evidenceId,
               new SourceEvidenceCorrectionChange(
-    "Corrected display label",
-    "Corrected administrative description",
+    SourceEvidenceMetadataFieldChange.Set("Corrected display label"),
+    SourceEvidenceMetadataFieldChange.Set("Corrected administrative description"),
     "Correction requested by authorized user")
              );
 
@@ -183,8 +183,8 @@ namespace HLAS.Tests
                         SeriesId.A,
                         EvidenceId.CreateNew(),
                 new SourceEvidenceCorrectionChange(
-    "Corrected display label",
-    "Corrected administrative description",
+    SourceEvidenceMetadataFieldChange.Set("Corrected display label"),
+    SourceEvidenceMetadataFieldChange.Set("Corrected administrative description"),
     "Correction requested by authorized user")
                ));
 
@@ -228,8 +228,8 @@ namespace HLAS.Tests
                         SeriesId.V,
                         EvidenceId.CreateNew(),
                       new SourceEvidenceCorrectionChange(
-    "Corrected display label",
-    "Corrected administrative description",
+    SourceEvidenceMetadataFieldChange.Set("Corrected display label"),
+    SourceEvidenceMetadataFieldChange.Set("Corrected administrative description"),
     "Correction requested by authorized user")
              ));
 
