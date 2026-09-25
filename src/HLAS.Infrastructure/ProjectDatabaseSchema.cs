@@ -14,7 +14,8 @@ namespace HLAS.Infrastructure
         public const int Version6 = 6;
         public const int Version7 = 7;
         public const int Version8 = 8;
-        public const int CurrentDatabaseSchemaVersion = Version8;
+        public const int Version9 = 9;
+        public const int CurrentDatabaseSchemaVersion = Version9;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -64,7 +65,13 @@ namespace HLAS.Infrastructure
             CreateSourceEvidenceMetadataVersionsTable(
                 connection,
                 transaction);
+            UpgradeSourceEvidenceMaintenanceToVersion9(
+                connection,
+                transaction);
 
+            UpgradeSourceEvidenceMetadataVersionsToVersion9(
+                connection,
+                transaction);
             using SqliteCommand insertMetadata =
                             connection.CreateCommand();
 
@@ -301,6 +308,38 @@ namespace HLAS.Infrastructure
                 Version7,
                 Version8);
         }
+        public static void MigrateVersion8ToVersion9(
+            SqliteConnection connection,
+            SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version8)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 8 to Version 9 migration requires database schema version 8.");
+            }
+
+            UpgradeSourceEvidenceMaintenanceToVersion9(
+                connection,
+                transaction);
+
+            UpgradeSourceEvidenceMetadataVersionsToVersion9(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version8,
+                Version9);
+        }
         private static void CreateFrozenStatesTable(
             SqliteConnection connection,
             SqliteTransaction transaction)
@@ -506,6 +545,179 @@ namespace HLAS.Infrastructure
         """;
 
             command.ExecuteNonQuery();
+        }
+        private static void UpgradeSourceEvidenceMaintenanceToVersion9(
+            SqliteConnection connection,
+            SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+                ALTER TABLE HLAS_Source_Evidence_Maintenance
+                ADD COLUMN ReplacementReason TEXT NULL
+                    CHECK
+                    (
+                        (
+                            MaintenanceType = 'CORRECT'
+                            AND ReplacementReason IS NULL
+                        )
+                        OR
+                        (
+                            MaintenanceType = 'REPLACE'
+                            AND ReplacementReason IS NOT NULL
+                            AND length(trim(ReplacementReason)) > 0
+                        )
+                    );
+                """;
+
+            command.ExecuteNonQuery();
+        }
+
+        private static void UpgradeSourceEvidenceMetadataVersionsToVersion9(
+            SqliteConnection connection,
+            SqliteTransaction transaction)
+        {
+            using (SqliteCommand createTable =
+                connection.CreateCommand())
+            {
+                createTable.Transaction = transaction;
+                createTable.CommandText =
+                    """
+                    CREATE TABLE HLAS_Source_Evidence_Metadata_Versions_v9
+                    (
+                        MetadataVersionId TEXT NOT NULL
+                            PRIMARY KEY,
+                        EvidenceId TEXT NOT NULL,
+                        VersionNumber INTEGER NOT NULL
+                            CHECK (VersionNumber > 0),
+                        PriorMetadataVersionId TEXT NULL,
+                        DisplayLabel TEXT NULL
+                            CHECK
+                            (
+                                DisplayLabel IS NULL
+                                OR length(trim(DisplayLabel)) > 0
+                            ),
+                        AdministrativeDescription TEXT NULL
+                            CHECK
+                            (
+                                AdministrativeDescription IS NULL
+                                OR length(trim(AdministrativeDescription)) > 0
+                            ),
+                        CorrectionReason TEXT NULL
+                            CHECK
+                            (
+                                CorrectionReason IS NULL
+                                OR length(trim(CorrectionReason)) > 0
+                            ),
+                        OperationId TEXT NOT NULL
+                            UNIQUE,
+                        VersionedUtc TEXT NOT NULL,
+
+                        CHECK
+                        (
+                            (
+                                VersionNumber = 1
+                                AND PriorMetadataVersionId IS NULL
+                            )
+                            OR
+                            (
+                                VersionNumber > 1
+                                AND PriorMetadataVersionId IS NOT NULL
+                            )
+                        ),
+
+                        CHECK
+                        (
+                            PriorMetadataVersionId IS NULL
+                            OR PriorMetadataVersionId <> MetadataVersionId
+                        ),
+
+                        UNIQUE
+                        (
+                            EvidenceId,
+                            VersionNumber
+                        ),
+
+                        UNIQUE
+                        (
+                            PriorMetadataVersionId
+                        ),
+
+                        FOREIGN KEY (EvidenceId)
+                            REFERENCES HLAS_Source_Evidence_Catalog(EvidenceId),
+
+                        FOREIGN KEY (PriorMetadataVersionId)
+                            REFERENCES HLAS_Source_Evidence_Metadata_Versions_v9(MetadataVersionId),
+
+                        FOREIGN KEY (OperationId)
+                            REFERENCES HLAS_Source_Evidence_Maintenance(OperationId)
+                    );
+                    """;
+
+                createTable.ExecuteNonQuery();
+            }
+
+            using (SqliteCommand copyHistory =
+                connection.CreateCommand())
+            {
+                copyHistory.Transaction = transaction;
+                copyHistory.CommandText =
+                    """
+                    INSERT INTO HLAS_Source_Evidence_Metadata_Versions_v9
+                    (
+                        MetadataVersionId,
+                        EvidenceId,
+                        VersionNumber,
+                        PriorMetadataVersionId,
+                        DisplayLabel,
+                        AdministrativeDescription,
+                        CorrectionReason,
+                        OperationId,
+                        VersionedUtc
+                    )
+                    SELECT
+                        MetadataVersionId,
+                        EvidenceId,
+                        VersionNumber,
+                        PriorMetadataVersionId,
+                        DisplayLabel,
+                        AdministrativeDescription,
+                        CorrectionReason,
+                        OperationId,
+                        VersionedUtc
+                    FROM HLAS_Source_Evidence_Metadata_Versions;
+                    """;
+
+                copyHistory.ExecuteNonQuery();
+            }
+
+            using (SqliteCommand dropOldTable =
+                connection.CreateCommand())
+            {
+                dropOldTable.Transaction = transaction;
+                dropOldTable.CommandText =
+                    """
+                    DROP TABLE HLAS_Source_Evidence_Metadata_Versions;
+                    """;
+
+                dropOldTable.ExecuteNonQuery();
+            }
+
+            using (SqliteCommand renameNewTable =
+                connection.CreateCommand())
+            {
+                renameNewTable.Transaction = transaction;
+                renameNewTable.CommandText =
+                    """
+                    ALTER TABLE HLAS_Source_Evidence_Metadata_Versions_v9
+                    RENAME TO HLAS_Source_Evidence_Metadata_Versions;
+                    """;
+
+                renameNewTable.ExecuteNonQuery();
+            }
         }
         private static void CreateProjectAuthorizationTable(
     SqliteConnection connection,

@@ -64,5 +64,31 @@
             AdministrativeDescription = administrativeDescription;
             CorrectionReason = correctionReason;
         }
+        public sealed record SourceEvidenceReplacementChange
+        {
+            public string SelectedReplacementSourceFilePath { get; }
+            public SourceEvidenceMetadataFieldChange DisplayLabel { get; }
+            public SourceEvidenceMetadataFieldChange AdministrativeDescription { get; }
+            public string ReplacementReason { get; }
+
+            public SourceEvidenceReplacementChange(
+                string selectedReplacementSourceFilePath,
+                SourceEvidenceMetadataFieldChange displayLabel,
+                SourceEvidenceMetadataFieldChange administrativeDescription,
+                string replacementReason)
+            {
+                ArgumentException.ThrowIfNullOrWhiteSpace(
+                    selectedReplacementSourceFilePath);
+                ArgumentNullException.ThrowIfNull(displayLabel);
+                ArgumentNullException.ThrowIfNull(administrativeDescription);
+                ArgumentException.ThrowIfNullOrWhiteSpace(replacementReason);
+
+                SelectedReplacementSourceFilePath =
+                    selectedReplacementSourceFilePath;
+                DisplayLabel = displayLabel;
+                AdministrativeDescription = administrativeDescription;
+                ReplacementReason = replacementReason;
+            }
+        }
     }
 }

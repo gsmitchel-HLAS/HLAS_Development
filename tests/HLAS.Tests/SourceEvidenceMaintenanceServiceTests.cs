@@ -1,8 +1,8 @@
-﻿using System;
-
-using HLAS.Application;
+﻿using HLAS.Application;
 using HLAS.Domain;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
+using static HLAS.Application.SourceEvidenceCorrectionChange;
 
 namespace HLAS.Tests
 {
@@ -269,14 +269,22 @@ namespace HLAS.Tests
                 EvidenceId.CreateNew();
 
             string replacementPath =
-                @"C:\Replacement\replacement.pdf";
+               @"C:\Replacement\replacement.pdf";
+
+            SourceEvidenceReplacementChange change =
+                new(
+                    replacementPath,
+                    SourceEvidenceMetadataFieldChange.Keep(),
+                    SourceEvidenceMetadataFieldChange.Keep(),
+                    "Developmental replacement reason");
 
             _ = service.Replace(
                 @"C:\DevelopmentalProject",
                 authenticatedIdentity,
                 SeriesId.V,
                 priorEvidenceId,
-                replacementPath);
+                change);
+           
 
             Assert.IsTrue(gateway.ReplaceCalled);
 
@@ -289,8 +297,14 @@ namespace HLAS.Tests
                 gateway.ReceivedPriorEvidenceId);
 
             Assert.AreEqual(
-                replacementPath,
-                gateway.ReceivedReplacementSourceFilePath);
+                 replacementPath,
+                 gateway.ReceivedReplacementChange!
+                     .SelectedReplacementSourceFilePath);
+
+            Assert.AreEqual(
+                "Developmental replacement reason",
+                gateway.ReceivedReplacementChange
+                    .ReplacementReason);
         }
         private sealed class FakeAuthenticationGateway
             : IAuthenticationGateway
@@ -329,7 +343,7 @@ namespace HLAS.Tests
         }
 
         private sealed class FakeMaintenanceGateway
-            : ISourceEvidenceMaintenanceGateway
+             : ISourceEvidenceMaintenanceGateway
         {
             public bool CorrectCalled { get; private set; }
             public bool ReplaceCalled { get; private set; }
@@ -338,9 +352,10 @@ namespace HLAS.Tests
                 ReceivedPriorEvidenceId
             { get; private set; }
 
-            public string?
-                ReceivedReplacementSourceFilePath
+            public SourceEvidenceReplacementChange?
+                ReceivedReplacementChange
             { get; private set; }
+
             public AuthorizedProjectIdentity?
                 ReceivedAuthorizedIdentity
             { get; private set; }
@@ -369,16 +384,16 @@ namespace HLAS.Tests
             }
 
             public SourceEvidenceMaintenanceRecord Replace(
-    string projectRoot,
-    AuthorizedProjectIdentity authorizedIdentity,
-    EvidenceId priorEvidenceId,
-    string selectedReplacementSourceFilePath)
+                string projectRoot,
+                AuthorizedProjectIdentity authorizedIdentity,
+                EvidenceId priorEvidenceId,
+                SourceEvidenceReplacementChange change)
             {
                 ReplaceCalled = true;
                 ReceivedAuthorizedIdentity = authorizedIdentity;
                 ReceivedPriorEvidenceId = priorEvidenceId;
-                ReceivedReplacementSourceFilePath =
-                    selectedReplacementSourceFilePath;
+                ReceivedReplacementChange = change;
+
                 EvidenceId resultingEvidenceId =
                     EvidenceId.CreateNew();
 
@@ -388,8 +403,12 @@ namespace HLAS.Tests
                     priorEvidenceId,
                     resultingEvidenceId,
                     SourceEvidenceMaintenanceRecord.ReplaceMaintenanceType,
-                    GovernedTimestamp.CreateNow());
+GovernedTimestamp.CreateNow(),
+change.ReplacementReason);
             }
         }
+
+
+    
     }
 }

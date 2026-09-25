@@ -11,7 +11,7 @@ namespace HLAS.Tests
     public sealed class ProjectDatabaseSchemaTests
     {
         [TestMethod]
-        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion8AndCurrentTables()
+        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion9AndCurrentTables()
         {
             string databasePath = CreateTemporaryDatabasePath();
 
@@ -1775,6 +1775,171 @@ Assert.IsTrue(
                 DeleteTemporaryDatabase(databasePath);
             }
         }
+        [TestMethod]
+        public void MigrateVersion8ToVersion9_CommittedTransaction_AdvancesSchema()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion8Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion8ToVersion9(
+                        connection,
+                        transaction);
+
+                    transaction.Commit();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version9,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsTrue(
+                    ColumnExists(
+                        connection,
+                        "HLAS_Source_Evidence_Maintenance",
+                        "ReplacementReason"));
+
+                Assert.IsFalse(
+                    ReadColumnNotNull(
+                        connection,
+                        "HLAS_Source_Evidence_Maintenance",
+                        "ReplacementReason"));
+
+                Assert.IsFalse(
+                    ReadColumnNotNull(
+                        connection,
+                        "HLAS_Source_Evidence_Metadata_Versions",
+                        "CorrectionReason"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+
+        [TestMethod]
+        public void MigrateVersion8ToVersion9_RolledBackTransaction_LeavesVersion8()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion8Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion8ToVersion9(
+                        connection,
+                        transaction);
+
+                    transaction.Rollback();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version8,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsFalse(
+                    ColumnExists(
+                        connection,
+                        "HLAS_Source_Evidence_Maintenance",
+                        "ReplacementReason"));
+
+                Assert.IsTrue(
+                    ReadColumnNotNull(
+                        connection,
+                        "HLAS_Source_Evidence_Metadata_Versions",
+                        "CorrectionReason"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+
+        [TestMethod]
+        public void MigrateVersion8ToVersion9_NonVersion8_SafeStops()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.InitializeNewDatabase(
+                        connection,
+                        transaction,
+                        ProjectId.CreateNew());
+
+                    transaction.Commit();
+                }
+
+                using SqliteTransaction migrationTransaction =
+                    connection.BeginTransaction();
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectDatabaseSchema.MigrateVersion8ToVersion9(
+                            connection,
+                            migrationTransaction));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                migrationTransaction.Rollback();
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.CurrentDatabaseSchemaVersion,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsTrue(
+                    ColumnExists(
+                        connection,
+                        "HLAS_Source_Evidence_Maintenance",
+                        "ReplacementReason"));
+
+                Assert.IsFalse(
+                    ReadColumnNotNull(
+                        connection,
+                        "HLAS_Source_Evidence_Metadata_Versions",
+                        "CorrectionReason"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
         private static void CreateVersion1Database(
             SqliteConnection connection,
             ProjectId projectId)
@@ -1894,6 +2059,23 @@ Assert.IsTrue(
                 transaction.Commit();
             }
         }
+        private static void CreateVersion8Database(
+            SqliteConnection connection,
+            ProjectId projectId)
+        {
+            CreateVersion7Database(
+                connection,
+                projectId);
+
+            using SqliteTransaction transaction =
+                connection.BeginTransaction();
+
+            ProjectDatabaseSchema.MigrateVersion7ToVersion8(
+                connection,
+                transaction);
+
+            transaction.Commit();
+        }
         private static void CreateMetadataTable(
             SqliteConnection connection,
             SqliteTransaction transaction)
@@ -1994,7 +2176,62 @@ Assert.IsTrue(
 
             return Convert.ToInt32(result);
         }
+        private static bool ColumnExists(
+            SqliteConnection connection,
+            string tableName,
+            string columnName)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
 
+            command.CommandText =
+                $"PRAGMA table_info({tableName});";
+
+            using SqliteDataReader reader =
+                command.ExecuteReader();
+
+            while (reader.Read())
+            {
+                if (string.Equals(
+                        reader.GetString(1),
+                        columnName,
+                        StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool ReadColumnNotNull(
+            SqliteConnection connection,
+            string tableName,
+            string columnName)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.CommandText =
+                $"PRAGMA table_info({tableName});";
+
+            using SqliteDataReader reader =
+                command.ExecuteReader();
+
+            while (reader.Read())
+            {
+                if (string.Equals(
+                        reader.GetString(1),
+                        columnName,
+                        StringComparison.Ordinal))
+                {
+                    return reader.GetInt32(3) == 1;
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"Column {columnName} was not found in {tableName}.");
+        }
         private static bool TableExists(
             SqliteConnection connection,
             string tableName)

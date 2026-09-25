@@ -16,6 +16,7 @@ namespace HLAS.Domain
         public EvidenceId ResultingEvidenceId { get; }
         public string MaintenanceType { get; }
         public GovernedTimestamp MaintainedUtc { get; }
+        public string? ReplacementReason { get; }
 
         public SourceEvidenceMaintenanceRecord(
             OperationId operationId,
@@ -23,7 +24,8 @@ namespace HLAS.Domain
             EvidenceId priorEvidenceId,
             EvidenceId resultingEvidenceId,
             string maintenanceType,
-            GovernedTimestamp maintainedUtc)
+            GovernedTimestamp maintainedUtc,
+            string? replacementReason = null)
         {
             if (operationId.Value == Guid.Empty)
             {
@@ -87,6 +89,27 @@ namespace HLAS.Domain
                     "REPLACE must create a new EvidenceId.",
                     nameof(resultingEvidenceId));
             }
+            if (string.Equals(
+        maintenanceType,
+        CorrectMaintenanceType,
+        StringComparison.Ordinal) &&
+    replacementReason is not null)
+            {
+                throw new ArgumentException(
+                    "CORRECT may not contain a ReplacementReason.",
+                    nameof(replacementReason));
+            }
+
+            if (string.Equals(
+                    maintenanceType,
+                    ReplaceMaintenanceType,
+                    StringComparison.Ordinal) &&
+                string.IsNullOrWhiteSpace(replacementReason))
+            {
+                throw new ArgumentException(
+                    "REPLACE requires a nonblank ReplacementReason.",
+                    nameof(replacementReason));
+            }
             if (maintainedUtc.Value == default)
             {
                 throw new ArgumentException(
@@ -100,6 +123,7 @@ namespace HLAS.Domain
             ResultingEvidenceId = resultingEvidenceId;
             MaintenanceType = maintenanceType;
             MaintainedUtc = maintainedUtc;
+            ReplacementReason = replacementReason;
         }
     }
 }

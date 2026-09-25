@@ -1,5 +1,5 @@
-﻿
-using HLAS.Domain;
+﻿using HLAS.Domain;
+using static HLAS.Application.SourceEvidenceCorrectionChange;
 
 namespace HLAS.Application
 {
@@ -24,11 +24,12 @@ namespace HLAS.Application
             AuthenticatedIdentity authenticatedIdentity,
             SeriesId seriesId,
             EvidenceId evidenceId,
-          SourceEvidenceCorrectionChange change)
+            SourceEvidenceCorrectionChange change)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
             ArgumentNullException.ThrowIfNull(authenticatedIdentity);
             ArgumentNullException.ThrowIfNull(change);
+
             VerifyVSeries(seriesId);
 
             AuthorizedProjectIdentity authorizedIdentity =
@@ -51,12 +52,11 @@ namespace HLAS.Application
             AuthenticatedIdentity authenticatedIdentity,
             SeriesId seriesId,
             EvidenceId priorEvidenceId,
-            string selectedReplacementSourceFilePath)
+            SourceEvidenceReplacementChange change)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
             ArgumentNullException.ThrowIfNull(authenticatedIdentity);
-            ArgumentException.ThrowIfNullOrWhiteSpace(
-                selectedReplacementSourceFilePath);
+            ArgumentNullException.ThrowIfNull(change);
 
             VerifyVSeries(seriesId);
 
@@ -72,7 +72,7 @@ namespace HLAS.Application
                 projectRoot,
                 authorizedIdentity,
                 priorEvidenceId,
-                selectedReplacementSourceFilePath);
+                change);
         }
 
         private static void VerifyVSeries(

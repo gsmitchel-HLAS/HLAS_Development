@@ -91,6 +91,741 @@ namespace HLAS.Tests
                 request.CorrectionReason);
         }
         [TestMethod]
+        public void ReplacementRequest_BlankReason_Rejects()
+        {
+            Assert.ThrowsExactly<ArgumentException>(
+                () => new SourceEvidenceReplacementRequest(
+                    @"C:\Replacement\replacement.pdf",
+                    SourceEvidenceMetadataMutation.Keep(),
+                    SourceEvidenceMetadataMutation.Keep(),
+                    " "));
+        }
+
+        [TestMethod]
+        public void ReplacementRequest_PreservesPathActionsAndReason()
+        {
+            SourceEvidenceReplacementRequest request =
+                new(
+                    @"C:\Replacement\replacement.pdf",
+                    SourceEvidenceMetadataMutation.Set(
+                        "Successor display label"),
+                    SourceEvidenceMetadataMutation.Clear(),
+                    "Governed replacement reason");
+
+            Assert.AreEqual(
+                @"C:\Replacement\replacement.pdf",
+                request.SelectedReplacementSourceFilePath);
+
+            Assert.AreEqual(
+                SourceEvidenceMetadataMutationAction.Set,
+                request.DisplayLabel.Action);
+
+            Assert.AreEqual(
+                SourceEvidenceMetadataMutationAction.Clear,
+                request.AdministrativeDescription.Action);
+
+            Assert.AreEqual(
+                "Governed replacement reason",
+                request.ReplacementReason);
+        }
+        [TestMethod]
+        public void Replace_DevelopmentalSource_PersistsGovernedSuccessorTransaction()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string priorSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental REPLACE Prior.txt");
+
+            string replacementSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental REPLACE Successor.txt");
+
+            File.WriteAllText(
+                priorSourcePath,
+                "HLAS developmental prior Source Evidence.");
+
+            File.WriteAllText(
+                replacementSourcePath,
+                "HLAS developmental successor Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord priorEvidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        priorSourcePath);
+
+                SourceEvidenceReplacementRequest request =
+                    new(
+                        replacementSourcePath,
+                        SourceEvidenceMetadataMutation.Set(
+                            "Successor display label"),
+                        SourceEvidenceMetadataMutation.Set(
+                            "Successor administrative description"),
+                        "Developmental REPLACE integration proof");
+
+                SourceEvidenceMaintenanceRecord result =
+                    SourceEvidenceMaintenanceGateway.Replace(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        priorEvidence.EvidenceId,
+                        request);
+
+                Assert.AreEqual(
+                    priorEvidence.EvidenceId,
+                    result.PriorEvidenceId);
+
+                Assert.AreNotEqual(
+                    priorEvidence.EvidenceId,
+                    result.ResultingEvidenceId);
+
+                Assert.AreEqual(
+                    SourceEvidenceMaintenanceRecord.ReplaceMaintenanceType,
+                    result.MaintenanceType);
+
+                Assert.AreEqual(
+                    "Developmental REPLACE integration proof",
+                    result.ReplacementReason);
+
+                Assert.AreEqual(
+                    2L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Evidence_Custody"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Frozen_States"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance"));
+
+                Assert.AreEqual(
+                    2L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance_Changes"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Metadata_Versions"));
+
+                VerifyStoredReplaceState(
+                    projectRoot,
+                    result);
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Replace_KeepAndClear_PreservesPriorMetadataAndCreatesExplicitSuccessorState()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string priorSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental REPLACE Metadata Prior.txt");
+
+            string replacementSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental REPLACE Metadata Successor.txt");
+
+            File.WriteAllText(
+                priorSourcePath,
+                "HLAS developmental prior metadata Source Evidence.");
+
+            File.WriteAllText(
+                replacementSourcePath,
+                "HLAS developmental successor metadata Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord priorEvidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        priorSourcePath);
+
+                _ = SourceEvidenceMaintenanceGateway.Correct(
+                    projectRoot,
+                    UserId.CreateNew(),
+                    ProjectRole.Admin,
+                    priorEvidence.EvidenceId,
+                    new SourceEvidenceCorrectionRequest(
+                        SourceEvidenceMetadataMutation.Set(
+                            "Prior display label"),
+                        SourceEvidenceMetadataMutation.Set(
+                            "Prior administrative description"),
+                        "Establish prior metadata state"));
+
+                SourceEvidenceMaintenanceRecord replaceResult =
+                    SourceEvidenceMaintenanceGateway.Replace(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        priorEvidence.EvidenceId,
+                        new SourceEvidenceReplacementRequest(
+                            replacementSourcePath,
+                            SourceEvidenceMetadataMutation.Keep(),
+                            SourceEvidenceMetadataMutation.Clear(),
+                            "KEEP CLEAR replacement proof"));
+
+                VerifyReplaceKeepClearTemporalState(
+                    projectRoot,
+                    priorEvidence.EvidenceId,
+                    replaceResult.ResultingEvidenceId);
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Replace_MaintenanceWriteFailure_RollsBackSuccessorAndCleansCustody()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string priorSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Failed REPLACE Prior.txt");
+
+            string replacementSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Failed REPLACE Successor.txt");
+
+            File.WriteAllText(
+                priorSourcePath,
+                "HLAS developmental prior failed REPLACE Source Evidence.");
+
+            File.WriteAllText(
+                replacementSourcePath,
+                "HLAS developmental successor failed REPLACE Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord priorEvidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        priorSourcePath);
+
+                string databasePath =
+                    Path.Combine(
+                        projectRoot,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                CREATE TRIGGER HLAS_Test_ForceReplaceMaintenanceFailure
+                BEFORE INSERT ON HLAS_Source_Evidence_Maintenance
+                BEGIN
+                    SELECT RAISE(
+                        ABORT,
+                        'forced developmental REPLACE maintenance failure');
+                END;
+                """;
+
+                    command.ExecuteNonQuery();
+                }
+
+                Assert.ThrowsExactly<SqliteException>(
+                    () => SourceEvidenceMaintenanceGateway.Replace(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        priorEvidence.EvidenceId,
+                        new SourceEvidenceReplacementRequest(
+                            replacementSourcePath,
+                            SourceEvidenceMetadataMutation.Set(
+                                "Failed successor label"),
+                            SourceEvidenceMetadataMutation.Set(
+                                "Failed successor description"),
+                            "Forced REPLACE maintenance failure proof")));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Evidence_Custody"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Catalog"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Frozen_States"));
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance"));
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance_Changes"));
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Metadata_Versions"));
+
+                string sourceEvidenceRoot =
+                    Path.Combine(
+                        projectRoot,
+                        EvidenceCustodyService.SourceEvidenceDirectoryName);
+
+                Assert.HasCount(
+    1,
+    Directory.GetDirectories(
+        sourceEvidenceRoot));
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                SELECT LifecycleState
+                FROM HLAS_Source_Evidence_Catalog
+                WHERE EvidenceId = $evidenceId;
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$evidenceId",
+                        priorEvidence.EvidenceId.Value.ToString("D"));
+
+                    Assert.AreEqual(
+                        "Active",
+                        Convert.ToString(
+                            command.ExecuteScalar()));
+                }
+
+                VerifySingleOperationOutcome(
+                    projectRoot,
+                    "TECHNICAL FAILURE",
+                    "REPLACE TECHNICAL FAILURE");
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Replace_MissingSelectedSource_SafeStopsBeforeGovernedHistory()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string priorSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Missing REPLACE Prior.txt");
+
+            File.WriteAllText(
+                priorSourcePath,
+                "HLAS developmental prior Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord priorEvidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        priorSourcePath);
+
+                string missingReplacementPath =
+                    Path.Combine(
+                        sourceDirectory,
+                        "Does Not Exist.txt");
+
+                FileNotFoundException exception =
+                    Assert.ThrowsExactly<FileNotFoundException>(
+                        () => SourceEvidenceMaintenanceGateway.Replace(
+                            projectRoot,
+                            UserId.CreateNew(),
+                            ProjectRole.Admin,
+                            priorEvidence.EvidenceId,
+                            new SourceEvidenceReplacementRequest(
+                                missingReplacementPath,
+                                SourceEvidenceMetadataMutation.Keep(),
+                                SourceEvidenceMetadataMutation.Keep(),
+                                "Missing replacement source proof")));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Governed_Operations"));
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Frozen_States"));
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance"));
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Metadata_Versions"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Evidence_Custody"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Catalog"));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Replace_SupersededPriorEvidence_SafeStopsBeforeNewGovernedHistory()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string priorSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Superseded REPLACE Prior.txt");
+
+            string firstReplacementPath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Superseded REPLACE First.txt");
+
+            string secondReplacementPath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Superseded REPLACE Second.txt");
+
+            File.WriteAllText(
+                priorSourcePath,
+                "HLAS developmental original Source Evidence.");
+
+            File.WriteAllText(
+                firstReplacementPath,
+                "HLAS developmental first replacement.");
+
+            File.WriteAllText(
+                secondReplacementPath,
+                "HLAS developmental second replacement.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord priorEvidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        priorSourcePath);
+
+                _ = SourceEvidenceMaintenanceGateway.Replace(
+                    projectRoot,
+                    UserId.CreateNew(),
+                    ProjectRole.Admin,
+                    priorEvidence.EvidenceId,
+                    new SourceEvidenceReplacementRequest(
+                        firstReplacementPath,
+                        SourceEvidenceMetadataMutation.Keep(),
+                        SourceEvidenceMetadataMutation.Keep(),
+                        "First replacement proof"));
+
+                long operationCountBeforeSecondAttempt =
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Governed_Operations");
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => SourceEvidenceMaintenanceGateway.Replace(
+                            projectRoot,
+                            UserId.CreateNew(),
+                            ProjectRole.Admin,
+                            priorEvidence.EvidenceId,
+                            new SourceEvidenceReplacementRequest(
+                                secondReplacementPath,
+                                SourceEvidenceMetadataMutation.Keep(),
+                                SourceEvidenceMetadataMutation.Keep(),
+                                "Invalid second replacement proof")));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                Assert.AreEqual(
+                    operationCountBeforeSecondAttempt,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Governed_Operations"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance"));
+
+                Assert.AreEqual(
+                    2L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Evidence_Custody"));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Replace_IdenticalPhysicalEvidence_SafeStopsBeforeGovernedHistory()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string priorSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Identical REPLACE Prior.txt");
+
+            string replacementSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Identical REPLACE Successor.txt");
+
+            const string identicalContents =
+                "HLAS identical physical Source Evidence.";
+
+            File.WriteAllText(
+                priorSourcePath,
+                identicalContents);
+
+            File.WriteAllText(
+                replacementSourcePath,
+                identicalContents);
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord priorEvidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        priorSourcePath);
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => SourceEvidenceMaintenanceGateway.Replace(
+                            projectRoot,
+                            UserId.CreateNew(),
+                            ProjectRole.Admin,
+                            priorEvidence.EvidenceId,
+                            new SourceEvidenceReplacementRequest(
+                                replacementSourcePath,
+                                SourceEvidenceMetadataMutation.Keep(),
+                                SourceEvidenceMetadataMutation.Keep(),
+                                "Identical replacement proof")));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Governed_Operations"));
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Frozen_States"));
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Evidence_Custody"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Catalog"));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
         public void Correct_DevelopmentalSource_PersistsGovernedTransaction()
         {
             string testRoot =
@@ -700,6 +1435,271 @@ namespace HLAS.Tests
                 DeleteTemporaryTestRoot(
                     testRoot);
             }
+        }
+        private static void VerifyStoredReplaceState(
+    string projectRoot,
+    SourceEvidenceMaintenanceRecord result)
+        {
+            string databasePath =
+                Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+            SqliteConnectionStringBuilder builder = new()
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false
+            };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            using (SqliteCommand maintenanceCommand =
+                connection.CreateCommand())
+            {
+                maintenanceCommand.CommandText =
+                    """
+            SELECT
+                MaintenanceType,
+                PriorEvidenceId,
+                ResultingEvidenceId,
+                ReplacementReason
+            FROM HLAS_Source_Evidence_Maintenance
+            WHERE OperationId = $operationId;
+            """;
+
+                maintenanceCommand.Parameters.AddWithValue(
+                    "$operationId",
+                    result.OperationId.Value.ToString("D"));
+
+                using SqliteDataReader reader =
+                    maintenanceCommand.ExecuteReader();
+
+                Assert.IsTrue(reader.Read());
+
+                Assert.AreEqual(
+                    "REPLACE",
+                    reader.GetString(0));
+
+                Assert.AreEqual(
+                    result.PriorEvidenceId.Value.ToString("D"),
+                    reader.GetString(1));
+
+                Assert.AreEqual(
+                    result.ResultingEvidenceId.Value.ToString("D"),
+                    reader.GetString(2));
+
+                Assert.AreEqual(
+                    "Developmental REPLACE integration proof",
+                    reader.GetString(3));
+            }
+
+            using (SqliteCommand catalogCommand =
+                connection.CreateCommand())
+            {
+                catalogCommand.CommandText =
+                    """
+            SELECT LifecycleState
+            FROM HLAS_Source_Evidence_Catalog
+            WHERE EvidenceId = $evidenceId;
+            """;
+
+                catalogCommand.Parameters.AddWithValue(
+                    "$evidenceId",
+                    result.PriorEvidenceId.Value.ToString("D"));
+
+                Assert.AreEqual(
+                    "Superseded",
+                    Convert.ToString(
+                        catalogCommand.ExecuteScalar()));
+
+                catalogCommand.Parameters["$evidenceId"].Value =
+                    result.ResultingEvidenceId.Value.ToString("D");
+
+                Assert.AreEqual(
+                    "Active",
+                    Convert.ToString(
+                        catalogCommand.ExecuteScalar()));
+            }
+
+            using (SqliteCommand metadataCommand =
+                connection.CreateCommand())
+            {
+                metadataCommand.CommandText =
+                    """
+            SELECT
+                VersionNumber,
+                PriorMetadataVersionId,
+                DisplayLabel,
+                AdministrativeDescription,
+                CorrectionReason,
+                OperationId
+            FROM HLAS_Source_Evidence_Metadata_Versions
+            WHERE EvidenceId = $evidenceId;
+            """;
+
+                metadataCommand.Parameters.AddWithValue(
+                    "$evidenceId",
+                    result.ResultingEvidenceId.Value.ToString("D"));
+
+                using SqliteDataReader reader =
+                    metadataCommand.ExecuteReader();
+
+                Assert.IsTrue(reader.Read());
+
+                Assert.AreEqual(
+                    1L,
+                    reader.GetInt64(0));
+
+                Assert.IsTrue(
+                    reader.IsDBNull(1));
+
+                Assert.AreEqual(
+                    "Successor display label",
+                    reader.GetString(2));
+
+                Assert.AreEqual(
+                    "Successor administrative description",
+                    reader.GetString(3));
+
+                Assert.IsTrue(
+                    reader.IsDBNull(4));
+
+                Assert.AreEqual(
+                    result.OperationId.Value.ToString("D"),
+                    reader.GetString(5));
+            }
+
+            using SqliteCommand operationCommand =
+                connection.CreateCommand();
+
+            operationCommand.CommandText =
+                """
+        SELECT Outcome
+        FROM HLAS_Governed_Operations
+        WHERE OperationId = $operationId;
+        """;
+
+            operationCommand.Parameters.AddWithValue(
+                "$operationId",
+                result.OperationId.Value.ToString("D"));
+
+            Assert.AreEqual(
+                "SUCCESS",
+                Convert.ToString(
+                    operationCommand.ExecuteScalar()));
+        }
+        private static void VerifyReplaceKeepClearTemporalState(
+    string projectRoot,
+    EvidenceId priorEvidenceId,
+    EvidenceId successorEvidenceId)
+        {
+            string databasePath =
+                Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+            SqliteConnectionStringBuilder builder = new()
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false
+            };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.CommandText =
+                """
+        SELECT
+            EvidenceId,
+            VersionNumber,
+            PriorMetadataVersionId,
+            DisplayLabel,
+            AdministrativeDescription,
+            CorrectionReason
+        FROM HLAS_Source_Evidence_Metadata_Versions
+        WHERE EvidenceId IN
+        (
+            $priorEvidenceId,
+            $successorEvidenceId
+        )
+        ORDER BY VersionedUtc;
+        """;
+
+            command.Parameters.AddWithValue(
+                "$priorEvidenceId",
+                priorEvidenceId.Value.ToString("D"));
+
+            command.Parameters.AddWithValue(
+                "$successorEvidenceId",
+                successorEvidenceId.Value.ToString("D"));
+
+            using SqliteDataReader reader =
+                command.ExecuteReader();
+
+            Assert.IsTrue(
+                reader.Read());
+
+            Assert.AreEqual(
+                priorEvidenceId.Value.ToString("D"),
+                reader.GetString(0));
+
+            Assert.AreEqual(
+                1L,
+                reader.GetInt64(1));
+
+            Assert.IsNull(
+                reader.IsDBNull(2)
+                    ? null
+                    : reader.GetString(2));
+
+            Assert.AreEqual(
+                "Prior display label",
+                reader.GetString(3));
+
+            Assert.AreEqual(
+                "Prior administrative description",
+                reader.GetString(4));
+
+            Assert.AreEqual(
+                "Establish prior metadata state",
+                reader.GetString(5));
+
+            Assert.IsTrue(
+                reader.Read());
+
+            Assert.AreEqual(
+                successorEvidenceId.Value.ToString("D"),
+                reader.GetString(0));
+
+            Assert.AreEqual(
+                1L,
+                reader.GetInt64(1));
+
+            Assert.IsTrue(
+                reader.IsDBNull(2));
+
+            Assert.AreEqual(
+                "Prior display label",
+                reader.GetString(3));
+
+            Assert.IsTrue(
+                reader.IsDBNull(4));
+
+            Assert.IsTrue(
+                reader.IsDBNull(5));
+
+            Assert.IsFalse(
+                reader.Read());
         }
         private static void VerifySingleOperationOutcome(
     string projectRoot,

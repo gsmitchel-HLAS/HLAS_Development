@@ -1,5 +1,6 @@
-﻿using System.Collections.Generic;
-using HLAS.Domain;
+﻿using HLAS.Domain;
+using System.Collections.Generic;
+using static HLAS.Application.SourceEvidenceCorrectionChange;
 
 namespace HLAS.Application
 {
@@ -15,6 +16,6 @@ namespace HLAS.Application
             string projectRoot,
             AuthorizedProjectIdentity authorizedIdentity,
             EvidenceId priorEvidenceId,
-            string selectedReplacementSourceFilePath);
+            SourceEvidenceReplacementChange change);
     }
 }

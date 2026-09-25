@@ -23,7 +23,7 @@ namespace HLAS.Tests
                 evidenceId,
                 SourceEvidenceMaintenanceRecord.CorrectMaintenanceType,
                 maintainedUtc);
-
+            Assert.IsNull(record.ReplacementReason);
             Assert.AreEqual(operationId, record.OperationId);
             Assert.AreEqual(freezeId, record.FreezeId);
             Assert.AreEqual(evidenceId, record.PriorEvidenceId);
@@ -46,8 +46,11 @@ namespace HLAS.Tests
                 priorEvidenceId,
                 resultingEvidenceId,
                 SourceEvidenceMaintenanceRecord.ReplaceMaintenanceType,
-                GovernedTimestamp.CreateNow());
-
+GovernedTimestamp.CreateNow(),
+"Governed replacement reason");
+            Assert.AreEqual(
+    "Governed replacement reason",
+    record.ReplacementReason);
             Assert.AreEqual(
                 priorEvidenceId,
                 record.PriorEvidenceId);
@@ -82,6 +85,36 @@ namespace HLAS.Tests
                     evidenceId,
                     SourceEvidenceMaintenanceRecord.ReplaceMaintenanceType,
                     GovernedTimestamp.CreateNow()));
+        }
+        [TestMethod]
+        public void Constructor_ReplaceBlankReason_IsRejected()
+        {
+            Assert.ThrowsExactly<ArgumentException>(
+                () => new SourceEvidenceMaintenanceRecord(
+                    OperationId.CreateNew(),
+                    FreezeId.CreateNew(),
+                    EvidenceId.CreateNew(),
+                    EvidenceId.CreateNew(),
+                    SourceEvidenceMaintenanceRecord.ReplaceMaintenanceType,
+                    GovernedTimestamp.CreateNow(),
+                    " "));
+        }
+
+        [TestMethod]
+        public void Constructor_CorrectWithReplacementReason_IsRejected()
+        {
+            EvidenceId evidenceId =
+                EvidenceId.CreateNew();
+
+            Assert.ThrowsExactly<ArgumentException>(
+                () => new SourceEvidenceMaintenanceRecord(
+                    OperationId.CreateNew(),
+                    FreezeId.CreateNew(),
+                    evidenceId,
+                    evidenceId,
+                    SourceEvidenceMaintenanceRecord.CorrectMaintenanceType,
+                    GovernedTimestamp.CreateNow(),
+                    "Not allowed for CORRECT"));
         }
     }
 }
