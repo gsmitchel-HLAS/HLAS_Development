@@ -19,7 +19,9 @@ namespace HLAS.Tests
                     AuthenticationGatewayResult.Succeeded(userId)));
 
             AuthenticatedIdentity authenticatedIdentity =
-                authenticationService.Authenticate();
+               authenticationService.Authenticate(
+    "development-user",
+    "development-secret");
 
             ProjectAuthorizationService authorizationService =
                 new(new FakeProjectAuthorizationGateway(
@@ -71,7 +73,9 @@ namespace HLAS.Tests
                     AuthenticationGatewayResult.Succeeded(userId)));
 
             AuthenticatedIdentity authenticatedIdentity =
-                authenticationService.Authenticate();
+                authenticationService.Authenticate(
+    "development-user",
+    "development-secret");
 
             ProjectAuthorizationService authorizationService =
                 new(new FakeProjectAuthorizationGateway(
@@ -116,7 +120,9 @@ namespace HLAS.Tests
                     AuthenticationGatewayResult.Succeeded(userId)));
 
             AuthenticatedIdentity authenticatedIdentity =
-                authenticationService.Authenticate();
+               authenticationService.Authenticate(
+    "development-user",
+    "development-secret");
 
             ProjectAuthorizationService authorizationService =
                 new(new FakeProjectAuthorizationGateway(
@@ -160,7 +166,9 @@ namespace HLAS.Tests
                     AuthenticationGatewayResult.Succeeded(userId)));
 
             AuthenticatedIdentity authenticatedIdentity =
-                authenticationService.Authenticate();
+                authenticationService.Authenticate(
+    "development-user",
+    "development-secret");
 
             ProjectAuthorizationService authorizationService =
                 new(new FakeProjectAuthorizationGateway(
@@ -205,7 +213,9 @@ namespace HLAS.Tests
                     AuthenticationGatewayResult.Succeeded(userId)));
 
             AuthenticatedIdentity authenticatedIdentity =
-                authenticationService.Authenticate();
+               authenticationService.Authenticate(
+    "development-user",
+    "development-secret");
 
             ProjectAuthorizationService authorizationService =
                 new(new FakeProjectAuthorizationGateway(
@@ -250,7 +260,9 @@ namespace HLAS.Tests
                     AuthenticationGatewayResult.Succeeded(userId)));
 
             AuthenticatedIdentity authenticatedIdentity =
-                authenticationService.Authenticate();
+                authenticationService.Authenticate(
+    "development-user",
+    "development-secret");
 
             ProjectAuthorizationService authorizationService =
                 new(new FakeProjectAuthorizationGateway(
@@ -317,13 +329,14 @@ namespace HLAS.Tests
                 _result = result;
             }
 
-            public AuthenticationGatewayResult Authenticate()
+            public AuthenticationGatewayResult Authenticate(
+    string loginName,
+    string secret)
             {
                 return _result;
             }
         }
-
-        private sealed class FakeProjectAuthorizationGateway
+            private sealed class FakeProjectAuthorizationGateway
             : IProjectAuthorizationGateway
         {
             private readonly ProjectAuthorizationGatewayResult _result;

@@ -32,7 +32,9 @@ namespace HLAS.Tests
                     new AuthenticationService(
                         new TestAuthenticationGateway(
                             AuthenticationGatewayResult.Succeeded(userId)))
-                    .Authenticate();
+                    .Authenticate(
+    "development-user",
+    "development-secret");
 
                 ProjectAuthorizationService authorizationService =
                     new(new StoredProjectAuthorizationGateway());
@@ -158,7 +160,9 @@ namespace HLAS.Tests
                 _result = result;
             }
 
-            public AuthenticationGatewayResult Authenticate()
+            public AuthenticationGatewayResult Authenticate(
+     string loginName,
+     string secret)
             {
                 return _result;
             }

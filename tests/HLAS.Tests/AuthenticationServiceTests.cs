@@ -17,7 +17,9 @@ namespace HLAS.Tests
                 new(new FakeAuthenticationGateway(
                     AuthenticationGatewayResult.Succeeded(userId)));
 
-            AuthenticatedIdentity identity = service.Authenticate();
+            AuthenticatedIdentity identity = service.Authenticate(
+    "development-user",
+    "development-secret");
 
             Assert.AreEqual(userId, identity.UserId);
         }
@@ -32,7 +34,9 @@ namespace HLAS.Tests
 
             InvalidOperationException exception =
                 Assert.ThrowsExactly<InvalidOperationException>(
-                    () => service.Authenticate());
+                    () => service.Authenticate(
+    "development-user",
+    "development-secret"));
 
             StringAssert.Contains(exception.Message, "SAFE-STOP");
         }
@@ -47,7 +51,9 @@ namespace HLAS.Tests
 
             InvalidOperationException exception =
                 Assert.ThrowsExactly<InvalidOperationException>(
-                    () => service.Authenticate());
+                    () => service.Authenticate(
+    "development-user",
+    "development-secret"));
 
             StringAssert.Contains(exception.Message, "SAFE-STOP");
         }
@@ -71,10 +77,13 @@ namespace HLAS.Tests
                 _result = result;
             }
 
-            public AuthenticationGatewayResult Authenticate()
+            public AuthenticationGatewayResult Authenticate(
+    string loginName,
+    string secret)
             {
                 return _result;
             }
+        
         }
     }
 }

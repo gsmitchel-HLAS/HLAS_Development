@@ -4,7 +4,9 @@ namespace HLAS.Application
 {
     public interface IAuthenticationGateway
     {
-        AuthenticationGatewayResult Authenticate();
+        AuthenticationGatewayResult Authenticate(
+            string loginName,
+            string secret);
     }
 
     public sealed record AuthenticationGatewayResult
@@ -49,9 +51,17 @@ namespace HLAS.Application
             _gateway = gateway;
         }
 
-        public AuthenticatedIdentity Authenticate()
+        public AuthenticatedIdentity Authenticate(
+    string loginName,
+    string secret)
         {
-            AuthenticationGatewayResult result = _gateway.Authenticate();
+            ArgumentException.ThrowIfNullOrWhiteSpace(loginName);
+            ArgumentException.ThrowIfNullOrWhiteSpace(secret);
+
+            AuthenticationGatewayResult result =
+                _gateway.Authenticate(
+                    loginName,
+                    secret);
 
             if (!result.IsAuthenticated || result.UserId is null)
             {
