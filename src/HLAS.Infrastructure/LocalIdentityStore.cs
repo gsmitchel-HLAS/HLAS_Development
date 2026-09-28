@@ -174,6 +174,48 @@ namespace HLAS.Infrastructure
 
             transaction.Commit();
         }
+        public static bool IsInitialBootstrapRequired()
+        {
+            return IsInitialBootstrapRequired(
+                GetDefaultDatabasePath());
+        }
+
+        public static bool IsInitialBootstrapRequired(
+            string databasePath)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(
+                databasePath);
+
+            databasePath =
+                Path.GetFullPath(databasePath);
+
+            EnsureCreated(databasePath);
+
+            SqliteConnectionStringBuilder builder = new()
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false,
+                ForeignKeys = true
+            };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.CommandText =
+                """
+        SELECT COUNT(*)
+        FROM HLAS_Users;
+        """;
+
+            return Convert.ToInt64(
+                command.ExecuteScalar()) == 0;
+        }
         public static UserId BootstrapInitialIdentity(
      string loginName,
      string secret)

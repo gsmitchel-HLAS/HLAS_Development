@@ -14,15 +14,7 @@ namespace HLAS.Infrastructure
         {
             _ = ProjectPackageReader.Open(projectRoot);
 
-            if (userId.Value == Guid.Empty)
-            {
-                throw new ArgumentException(
-                    "UserId may not be empty.",
-                    nameof(userId));
-            }
-
-            string roleValue =
-                ValidateProjectRole(projectRole);
+            
 
             string databasePath = Path.Combine(
                 Path.GetFullPath(projectRoot),
@@ -43,62 +35,11 @@ namespace HLAS.Infrastructure
             using SqliteTransaction transaction =
                 connection.BeginTransaction();
 
-            using SqliteCommand existing =
-                connection.CreateCommand();
-
-            existing.Transaction = transaction;
-            existing.CommandText =
-                """
-                SELECT COUNT(*)
-                FROM HLAS_Project_Authorization
-                WHERE UserId = $userId;
-                """;
-
-            existing.Parameters.AddWithValue(
-                "$userId",
-                userId.Value.ToString("D"));
-
-            long count = (long)existing.ExecuteScalar()!;
-
-            if (count != 0)
-            {
-                throw new InvalidOperationException(
-                    "SAFE-STOP: This HLAS identity already has project authorization.");
-            }
-
-            using SqliteCommand insert =
-                connection.CreateCommand();
-
-            insert.Transaction = transaction;
-            insert.CommandText =
-                """
-                INSERT INTO HLAS_Project_Authorization
-                    (
-                        UserId,
-                        ProjectRole,
-                        AuthorizedUtc
-                    )
-                VALUES
-                    (
-                        $userId,
-                        $projectRole,
-                        $authorizedUtc
-                    );
-                """;
-
-            insert.Parameters.AddWithValue(
-                "$userId",
-                userId.Value.ToString("D"));
-
-            insert.Parameters.AddWithValue(
-                "$projectRole",
-                roleValue);
-
-            insert.Parameters.AddWithValue(
-                "$authorizedUtc",
-                GovernedTimestamp.CreateNow().Value.ToString("O"));
-
-            insert.ExecuteNonQuery();
+            AddAuthorizationInTransaction(
+    connection,
+    transaction,
+    userId,
+    projectRole);
 
             transaction.Commit();
         }
@@ -162,7 +103,89 @@ namespace HLAS.Infrastructure
                     "SAFE-STOP: Stored project authorization role is invalid.")
             };
         }
+        internal static void AddAuthorizationInTransaction(
+    SqliteConnection connection,
+    SqliteTransaction transaction,
+    UserId userId,
+    ProjectRole projectRole)
+        {
+            ArgumentNullException.ThrowIfNull(
+                connection);
 
+            ArgumentNullException.ThrowIfNull(
+                transaction);
+
+            if (userId.Value == Guid.Empty)
+            {
+                throw new ArgumentException(
+                    "UserId may not be empty.",
+                    nameof(userId));
+            }
+
+            string roleValue =
+                ValidateProjectRole(
+                    projectRole);
+
+            using SqliteCommand existing =
+                connection.CreateCommand();
+
+            existing.Transaction = transaction;
+            existing.CommandText =
+                """
+        SELECT COUNT(*)
+        FROM HLAS_Project_Authorization
+        WHERE UserId = $userId;
+        """;
+
+            existing.Parameters.AddWithValue(
+                "$userId",
+                userId.Value.ToString("D"));
+
+            long count =
+                (long)existing.ExecuteScalar()!;
+
+            if (count != 0)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: This HLAS identity already has project authorization.");
+            }
+
+            using SqliteCommand insert =
+                connection.CreateCommand();
+
+            insert.Transaction = transaction;
+            insert.CommandText =
+                """
+        INSERT INTO HLAS_Project_Authorization
+            (
+                UserId,
+                ProjectRole,
+                AuthorizedUtc
+            )
+        VALUES
+            (
+                $userId,
+                $projectRole,
+                $authorizedUtc
+            );
+        """;
+
+            insert.Parameters.AddWithValue(
+                "$userId",
+                userId.Value.ToString("D"));
+
+            insert.Parameters.AddWithValue(
+                "$projectRole",
+                roleValue);
+
+            insert.Parameters.AddWithValue(
+                "$authorizedUtc",
+                GovernedTimestamp.CreateNow()
+                    .Value
+                    .ToString("O"));
+
+            insert.ExecuteNonQuery();
+        }
         private static string ValidateProjectRole(
             ProjectRole projectRole)
         {

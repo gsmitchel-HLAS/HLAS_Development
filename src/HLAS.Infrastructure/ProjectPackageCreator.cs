@@ -12,7 +12,33 @@ namespace HLAS.Infrastructure
         public const string ManifestFileName = "HLAS_Project.json";
         public const string DatabaseFileName = "HLAS_Project.db";
 
-        public static ProjectManifest CreateNew(string projectRoot)
+        public static ProjectManifest CreateNew(
+    string projectRoot)
+        {
+            return CreateNewCore(
+                projectRoot,
+                initialAdminUserId: null);
+        }
+
+        public static ProjectManifest CreateNew(
+            string projectRoot,
+            UserId initialAdminUserId)
+        {
+            if (initialAdminUserId.Value == Guid.Empty)
+            {
+                throw new ArgumentException(
+                    "Initial project Admin UserId may not be empty.",
+                    nameof(initialAdminUserId));
+            }
+
+            return CreateNewCore(
+                projectRoot,
+                initialAdminUserId);
+        }
+
+        private static ProjectManifest CreateNewCore(
+            string projectRoot,
+            UserId? initialAdminUserId)
         {
             if (string.IsNullOrWhiteSpace(projectRoot))
             {
@@ -75,9 +101,18 @@ namespace HLAS.Infrastructure
                         connection.BeginTransaction();
 
                     ProjectDatabaseSchema.InitializeNewDatabase(
-      connection,
-      transaction,
-      manifest.ProjectId);
+    connection,
+    transaction,
+    manifest.ProjectId);
+
+                    if (initialAdminUserId is not null)
+                    {
+                        ProjectAuthorizationStore.AddAuthorizationInTransaction(
+                            connection,
+                            transaction,
+                            initialAdminUserId.Value,
+                            ProjectRole.Admin);
+                    }
 
                     transaction.Commit();
                 }

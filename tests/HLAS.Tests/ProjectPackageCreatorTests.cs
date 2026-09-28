@@ -174,7 +174,62 @@ namespace HLAS.Tests
                 DeleteTemporaryProjectRoot(projectRoot);
             }
         }
+        [TestMethod]
+        public void CreateNew_WithInitialAdmin_CreatesAdminAuthorization()
+        {
+            string projectRoot =
+                CreateTemporaryProjectRootPath();
 
+            UserId userId =
+                UserId.CreateNew();
+
+            try
+            {
+                _ = ProjectPackageCreator.CreateNew(
+                    projectRoot,
+                    userId);
+
+                ProjectRole? role =
+                    ProjectAuthorizationStore.ResolveRole(
+                        projectRoot,
+                        userId);
+
+                Assert.IsNotNull(
+                    role);
+
+                Assert.AreEqual(
+                    ProjectRole.Admin,
+                    role.Value);
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(
+                    projectRoot);
+            }
+        }
+
+        [TestMethod]
+        public void CreateNew_EmptyInitialAdminUserId_RejectsBeforeCreatingPackage()
+        {
+            string projectRoot =
+                CreateTemporaryProjectRootPath();
+
+            try
+            {
+                Assert.ThrowsExactly<ArgumentException>(
+                    () => ProjectPackageCreator.CreateNew(
+                        projectRoot,
+                        new UserId(Guid.Empty)));
+
+                Assert.IsFalse(
+                    Directory.Exists(projectRoot));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(
+                    projectRoot);
+            }
+        }
         private static string CreateTemporaryProjectRootPath()
         {
             return Path.Combine(

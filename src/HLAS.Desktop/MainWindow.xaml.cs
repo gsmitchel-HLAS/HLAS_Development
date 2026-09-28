@@ -1,233 +1,201 @@
-﻿using HLAS.Application;
-using HLAS.Domain;
+﻿using HLAS.Infrastructure;
 using Microsoft.Win32;
-using System.Diagnostics;
 using System.Windows;
 
 namespace HLAS.Desktop
 {
     public partial class MainWindow : Window
     {
-        private readonly DevelopmentalProjectSession _developmentalSession;
-        private readonly ShellContext _context;
-        private readonly ShellCommandRouter _router = new();
-        private readonly ProductionSourceEvidenceIntakeService _productionIntakeService;
-        private readonly ProductionSourceEvidenceRetrievalService _productionRetrievalService;
-        private readonly DevelopmentalProjectHistoryProofService _projectHistoryProofService;
-        private EvidenceId? _lastProductionEvidenceId;
+        private OperationalUserSession? _userSession;
+        private OperationalProjectSession? _projectSession;
         public MainWindow()
         {
             InitializeComponent();
 
-            _developmentalSession =
-                DevelopmentalProjectSession.Create();
+            RefreshAuthenticationState();
+            RefreshContext();
+        }
 
-            _context = new ShellContext(
-                _developmentalSession.Manifest.ProjectId,
-                UserId.CreateNew(),
-                ProjectRole.Admin,
-                SeriesId.V);
+        private void BootstrapIdentityButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            try
+            {
+                _userSession =
+                    OperationalUserSession.BootstrapInitialIdentity(
+                        LoginNameTextBox.Text,
+                        SecretPasswordBox.Password);
 
-            _productionIntakeService =
-                new ProductionSourceEvidenceIntakeService(
-             new ProductionSourceEvidenceIntakeGatewayAdapter());
+                SecretPasswordBox.Clear();
 
-            _productionRetrievalService =
-    new ProductionSourceEvidenceRetrievalService(
-        new EvidenceCustodyGatewayAdapter());
+                CommandResultText.Text =
+                    "Initial HLAS identity created and authenticated.";
 
-            _projectHistoryProofService =
-      new DevelopmentalProjectHistoryProofService(
-          new DevelopmentalProjectHistoryProofGatewayAdapter());
+                RefreshAuthenticationState();
+                RefreshContext();
+            }
+            catch (Exception ex)
+            {
+                CommandResultText.Text =
+                    ex.Message;
+            }
+        }
+
+        private void LoginButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            try
+            {
+                _userSession =
+                    OperationalUserSession.Authenticate(
+                        LoginNameTextBox.Text,
+                        SecretPasswordBox.Password);
+
+                SecretPasswordBox.Clear();
+
+                CommandResultText.Text =
+                    "HLAS authentication succeeded.";
+
+                RefreshAuthenticationState();
+                RefreshContext();
+            }
+            catch (Exception ex)
+            {
+                CommandResultText.Text =
+                    ex.Message;
+            }
+        }
+        private void NewProjectButton_Click(
+    object sender,
+    RoutedEventArgs e)
+        {
+            try
+            {
+                if (_userSession is null)
+                {
+                    throw new InvalidOperationException(
+                        "SAFE-STOP: Login is required.");
+                }
+
+                OpenFolderDialog dialog = new()
+                {
+                    Title = "Save New HLAS Project As"
+                };
+
+                if (dialog.ShowDialog() != true)
+                {
+                    return;
+                }
+
+                _projectSession =
+                    OperationalProjectSession.CreateNew(
+                        dialog.FolderName,
+                        _userSession.AuthenticatedIdentity);
+
+                CommandResultText.Text =
+                    "New HLAS project created.";
+
+                RefreshContext();
+            }
+            catch (Exception ex)
+            {
+                CommandResultText.Text =
+                    ex.Message;
+            }
+        }
+
+        private void OpenProjectButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            try
+            {
+                if (_userSession is null)
+                {
+                    throw new InvalidOperationException(
+                        "SAFE-STOP: Login is required.");
+                }
+
+                OpenFolderDialog dialog = new()
+                {
+                    Title = "Open Existing HLAS Project"
+                };
+
+                if (dialog.ShowDialog() != true)
+                {
+                    return;
+                }
+
+                _projectSession =
+                    OperationalProjectSession.OpenExisting(
+                        dialog.FolderName,
+                        _userSession.AuthenticatedIdentity);
+
+                CommandResultText.Text =
+                    "HLAS project opened.";
+
+                RefreshContext();
+            }
+            catch (Exception ex)
+            {
+                CommandResultText.Text =
+                    ex.Message;
+            }
+        }
+        private void RefreshAuthenticationState()
+        {
+            bool bootstrapRequired =
+                LocalIdentityStore.IsInitialBootstrapRequired();
+
+            BootstrapIdentityButton.IsEnabled =
+                bootstrapRequired &&
+                _userSession is null;
+
+            LoginButton.IsEnabled =
+                !bootstrapRequired &&
+                _userSession is null;
+
+            NewProjectButton.IsEnabled =
+    _userSession is not null;
+
+            OpenProjectButton.IsEnabled =
+                _userSession is not null;
+
+            AuthenticationStatusText.Text =
+                bootstrapRequired
+                    ? "Initial HLAS user must be created."
+                    : _userSession is null
+                        ? "Login required."
+                        : "HLAS user authenticated.";
+        }
+
+        
+            private void RefreshContext()
+        {
             ProjectContextText.Text =
-                $"DEVELOPMENTAL: {_context.ProjectId}";
+                _projectSession is null
+                    ? "No project open"
+                    : _projectSession.Context.ProjectId?.ToString()
+                        ?? "None";
 
             UserContextText.Text =
-                $"DEVELOPMENTAL: {_context.UserId}";
+                _userSession is null
+                    ? "No authenticated user"
+                    : _userSession.AuthenticatedIdentity.UserId.ToString();
 
             RoleContextText.Text =
-                _context.ProjectRole?.ToString() ?? "None";
+                _projectSession?.Context.ProjectRole?.ToString()
+                ?? "None";
 
             SeriesContextText.Text =
-                _context.SeriesId?.ToString() ?? "None";
-        }
-
-        private void ShowContextButton_Click(
-            object sender,
-            RoutedEventArgs e)
-        {
-            ShellCommandResult result =
-                _router.Route(
-                    ShellCommand.ShowContext,
-                    _context);
-
-            CommandResultText.Text = result.Message;
-        }
-
-        private void SelectProductionSourceButton_Click(
-            object sender,
-            RoutedEventArgs e)
-        {
-            OpenFileDialog dialog = new()
-            {
-                Title = "Select Developmental Production Source"
-            };
-
-            if (dialog.ShowDialog() != true)
-            {
-                CommandResultText.Text =
-                    "Developmental Production Source selection cancelled.";
-
-                return;
-            }
-
-            try
-            {
-                ProjectId projectId =
-      _context.ProjectId
-      ?? throw new InvalidOperationException(
-          "Developmental ProjectId is not available.");
-
-                UserId userId =
-                    _context.UserId
-                    ?? throw new InvalidOperationException(
-                        "Developmental UserId is not available.");
-
-                ProjectRole projectRole =
-                    _context.ProjectRole
-                    ?? throw new InvalidOperationException(
-                        "Developmental ProjectRole is not available.");
-
-                SeriesId seriesId =
-                    _context.SeriesId
-                    ?? throw new InvalidOperationException(
-                        "Developmental SeriesId is not available.");
-
-                ProductionSourceEvidenceIntakeRequest request =
-                    new(
-                        projectId,
-                        userId,
-                        projectRole,
-                        seriesId,
-                        dialog.FileName);
-
-                ProductionSourceEvidenceIntakeResult result =
-                    _productionIntakeService.Intake(
-                        _developmentalSession.ProjectRoot,
-                        request);
-
-                _lastProductionEvidenceId =
-    result.EvidenceRecord.EvidenceId;
-
-                CommandResultText.Text =
-                    $"{result.Message}\n" +
-                    $"Evidence ID: {result.EvidenceRecord.EvidenceId}\n" +
-                    $"Original file: {result.EvidenceRecord.OriginalFileName}\n" +
-                    $"Custody path: {result.EvidenceRecord.RelativeCustodyPath}\n" +
-                    $"SHA-256: {result.EvidenceRecord.Sha256Hex}";
-            }
-            catch (Exception ex)
-            {
-                CommandResultText.Text =
-                    $"Developmental Production Source intake failed: {ex.Message}";
-            }
-        }
-
-      private void ViewProductionSourceButton_Click(
-    object sender,
-    RoutedEventArgs e)
-{
-    try
-    {
-        EvidenceId evidenceId =
-            _lastProductionEvidenceId
-            ?? throw new InvalidOperationException(
-                "No developmental Production Source Evidence has been accepted in this session.");
-
-        ProjectId projectId =
-            _context.ProjectId
-            ?? throw new InvalidOperationException(
-                "Developmental ProjectId is not available.");
-
-        UserId userId =
-            _context.UserId
-            ?? throw new InvalidOperationException(
-                "Developmental UserId is not available.");
-
-        ProjectRole projectRole =
-            _context.ProjectRole
-            ?? throw new InvalidOperationException(
-                "Developmental ProjectRole is not available.");
-
-        SeriesId seriesId =
-            _context.SeriesId
-            ?? throw new InvalidOperationException(
-                "Developmental SeriesId is not available.");
-
-        ProductionSourceEvidenceRetrievalRequest request =
-            new(
-                projectId,
-                userId,
-                projectRole,
-                seriesId,
-                evidenceId);
-
-        EvidenceCustodyRetrievalResult result =
-            _productionRetrievalService.Retrieve(
-                _developmentalSession.ProjectRoot,
-                request);
-
-        Process.Start(
-            new ProcessStartInfo
-            {
-                FileName = result.ControlledFilePath,
-                UseShellExecute = true
-            });
-
-        CommandResultText.Text =
-            $"Developmental Production Source Evidence retrieval completed.\n" +
-            $"Evidence ID: {result.EvidenceRecord.EvidenceId}\n" +
-            $"Controlled file: {result.ControlledFilePath}";
-    }
-    catch (Exception ex)
-    {
-        CommandResultText.Text =
-            $"Developmental Production Source retrieval failed: {ex.Message}";
-    }
-}
-       
-        private void RunDevelopmentalHistoryProofButton_Click(
-    object sender,
-    RoutedEventArgs e)
-        {
-            OpenFolderDialog dialog = new()
-            {
-                Title = "Select Persistent Developmental HLAS Project Folder"
-            };
-
-            if (dialog.ShowDialog() != true)
-            {
-                CommandResultText.Text =
-                    "Persistent developmental project selection cancelled.";
-
-                return;
-            }
-
-            try
-            {
-                throw new InvalidOperationException(
-    "SAFE-STOP: Persistent developmental project-history proof now requires authenticated project authorization.");
-            }
-            catch (Exception ex)
-            {
-                CommandResultText.Text =
-                    $"Persistent developmental project-history proof failed: {ex.Message}";
-            }
-        }
-        protected override void OnClosed(EventArgs e)
-        {
-            _developmentalSession.Dispose();
-            base.OnClosed(e);
+                _projectSession?.Context.SeriesId?.ToString()
+                ?? "None";
+            ProjectStatusFooterText.Text =
+        _projectSession is null
+            ? "No governed HLAS project is open."
+            : "Governed HLAS project is open.";
         }
     }
 }
