@@ -11,7 +11,7 @@ namespace HLAS.Tests
     public sealed class ProjectDatabaseSchemaTests
     {
         [TestMethod]
-        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion10AndCurrentTables()
+        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion11AndCurrentTables ()
         {
             string databasePath = CreateTemporaryDatabasePath();
 
@@ -85,6 +85,15 @@ Assert.IsTrue(
                     TableExists(
                         connection,
                         "HLAS_Readiness_Check_Items"));
+                Assert.IsTrue(
+    TableExists(
+        connection,
+        "HLAS_Source_Evidence_Requirement_Revisions"));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Requirement_Items"));
             }
             finally
             {
@@ -264,6 +273,15 @@ Assert.IsTrue(
     TableExists(
         connection,
         "HLAS_Source_Evidence_Metadata_Versions"));
+                Assert.IsFalse(
+    TableExists(
+        connection,
+        "HLAS_Source_Evidence_Requirement_Revisions"));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Requirement_Items"));
             }
             finally
             {
@@ -2102,7 +2120,264 @@ Assert.IsTrue(
                 DeleteTemporaryDatabase(databasePath);
             }
         }
+        [TestMethod]
+        public void MigrateVersion10ToVersion11_CommittedTransaction_AdvancesSchemaAndAddsRequirementTables()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
 
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion10Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion10ToVersion11(
+                        connection,
+                        transaction);
+
+                    transaction.Commit();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version11,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Requirement_Revisions"));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Requirement_Items"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion10ToVersion11_RolledBackTransaction_LeavesVersion10()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion10Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion10ToVersion11(
+                        connection,
+                        transaction);
+
+                    transaction.Rollback();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version10,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Requirement_Revisions"));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Requirement_Items"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion10ToVersion11_NonVersion10_SafeStops()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion9Database(
+                    connection,
+                    projectId);
+
+                using SqliteTransaction migrationTransaction =
+                    connection.BeginTransaction();
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectDatabaseSchema.MigrateVersion10ToVersion11(
+                            connection,
+                            migrationTransaction));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                migrationTransaction.Rollback();
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version9,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Requirement_Revisions"));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Source_Evidence_Requirement_Items"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void SourceEvidenceRequirementRevision_VersionGreaterThanOneWithoutPrior_IsRejected()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+                string operationId =
+    Guid.NewGuid().ToString("D");
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.InitializeNewDatabase(
+                        connection,
+                        transaction,
+                        projectId);
+
+                    transaction.Commit();
+                    using (SqliteCommand operationCommand =
+    connection.CreateCommand())
+                    {
+                        operationCommand.CommandText =
+                            """
+        INSERT INTO HLAS_Governed_Operations
+        (
+            OperationId,
+            ProjectId,
+            UserId,
+            SeriesId,
+            ProjectRole,
+            StartedUtc
+        )
+        VALUES
+        (
+            $operationId,
+            $projectId,
+            $userId,
+            'V',
+            'Admin',
+            $startedUtc
+        );
+        """;
+
+                        operationCommand.Parameters.AddWithValue(
+                            "$operationId",
+                            operationId);
+
+                        operationCommand.Parameters.AddWithValue(
+                            "$projectId",
+                            projectId.Value.ToString("D"));
+
+                        operationCommand.Parameters.AddWithValue(
+                            "$userId",
+                            Guid.NewGuid().ToString("D"));
+
+                        operationCommand.Parameters.AddWithValue(
+                            "$startedUtc",
+                            DateTimeOffset.UtcNow.ToString("O"));
+
+                        operationCommand.ExecuteNonQuery();
+                    }
+                }
+
+                using SqliteCommand command =
+                    connection.CreateCommand();
+
+                command.CommandText =
+                    """
+            INSERT INTO HLAS_Source_Evidence_Requirement_Revisions
+            (
+                RequirementRevisionId,
+                RevisionNumber,
+                PriorRequirementRevisionId,
+                OperationId,
+                ApprovedUtc
+            )
+            VALUES
+            (
+                $requirementRevisionId,
+                2,
+                NULL,
+                $operationId,
+                $approvedUtc
+            );
+            """;
+
+                command.Parameters.AddWithValue(
+                    "$requirementRevisionId",
+                    Guid.NewGuid().ToString("D"));
+
+                command.Parameters.AddWithValue(
+      "$operationId",
+      operationId);
+
+                command.Parameters.AddWithValue(
+                    "$approvedUtc",
+                    DateTimeOffset.UtcNow.ToString("O"));
+
+                Assert.ThrowsExactly<SqliteException>(
+                    () => command.ExecuteNonQuery());
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
         private static void CreateVersion1Database(
             SqliteConnection connection,
             ProjectId projectId)
@@ -2279,7 +2554,23 @@ Assert.IsTrue(
 
             command.ExecuteNonQuery();
         }
+        private static void CreateVersion10Database(
+    SqliteConnection connection,
+    ProjectId projectId)
+        {
+            CreateVersion9Database(
+                connection,
+                projectId);
 
+            using SqliteTransaction transaction =
+                connection.BeginTransaction();
+
+            ProjectDatabaseSchema.MigrateVersion9ToVersion10(
+                connection,
+                transaction);
+
+            transaction.Commit();
+        }
         private static void InsertMetadata(
             SqliteConnection connection,
             SqliteTransaction transaction,

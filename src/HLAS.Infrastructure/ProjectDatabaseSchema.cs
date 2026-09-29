@@ -16,7 +16,8 @@ namespace HLAS.Infrastructure
         public const int Version8 = 8;
         public const int Version9 = 9;
         public const int Version10 = 10;
-        public const int CurrentDatabaseSchemaVersion = Version10;
+        public const int Version11 = 11;
+        public const int CurrentDatabaseSchemaVersion = Version11;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -74,6 +75,13 @@ namespace HLAS.Infrastructure
     transaction);
 
             CreateReadinessCheckItemsTable(
+                connection,
+                transaction);
+            CreateSourceEvidenceRequirementRevisionsTable(
+    connection,
+    transaction);
+
+            CreateSourceEvidenceRequirementItemsTable(
                 connection,
                 transaction);
             UpgradeSourceEvidenceMetadataVersionsToVersion9(
@@ -378,6 +386,159 @@ namespace HLAS.Infrastructure
                 transaction,
                 Version9,
                 Version10);
+        }
+        public static void MigrateVersion10ToVersion11(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version10)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 10 to Version 11 migration requires database schema version 10.");
+            }
+
+            CreateSourceEvidenceRequirementRevisionsTable(
+                connection,
+                transaction);
+
+            CreateSourceEvidenceRequirementItemsTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version10,
+                Version11);
+        }
+        private static void CreateSourceEvidenceRequirementRevisionsTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Source_Evidence_Requirement_Revisions
+        (
+            RequirementRevisionId TEXT NOT NULL
+                PRIMARY KEY,
+            RevisionNumber INTEGER NOT NULL
+                CHECK (RevisionNumber > 0),
+            PriorRequirementRevisionId TEXT NULL,
+            OperationId TEXT NOT NULL
+                UNIQUE,
+            ApprovedUtc TEXT NOT NULL,
+
+            CHECK
+            (
+                (
+                    RevisionNumber = 1
+                    AND PriorRequirementRevisionId IS NULL
+                )
+                OR
+                (
+                    RevisionNumber > 1
+                    AND PriorRequirementRevisionId IS NOT NULL
+                )
+            ),
+
+            CHECK
+            (
+                PriorRequirementRevisionId IS NULL
+                OR PriorRequirementRevisionId <> RequirementRevisionId
+            ),
+
+            UNIQUE (RevisionNumber),
+            UNIQUE (PriorRequirementRevisionId),
+
+            FOREIGN KEY (PriorRequirementRevisionId)
+                REFERENCES HLAS_Source_Evidence_Requirement_Revisions(
+                    RequirementRevisionId),
+
+            FOREIGN KEY (OperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateSourceEvidenceRequirementItemsTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Source_Evidence_Requirement_Items
+        (
+            RequirementRevisionId TEXT NOT NULL,
+            RequirementKey TEXT NOT NULL
+                CHECK (length(trim(RequirementKey)) > 0),
+            RequirementState TEXT NOT NULL
+                CHECK
+                (
+                    RequirementState IN
+                    (
+                        'PENDING',
+                        'RECEIVED',
+                        'NOT_REQUIRED'
+                    )
+                ),
+            EvidenceId TEXT NULL,
+            NotRequiredReason TEXT NULL,
+
+            CHECK
+            (
+                (
+                    RequirementState = 'PENDING'
+                    AND EvidenceId IS NULL
+                    AND NotRequiredReason IS NULL
+                )
+                OR
+                (
+                    RequirementState = 'RECEIVED'
+                    AND EvidenceId IS NOT NULL
+                    AND NotRequiredReason IS NULL
+                )
+                OR
+                (
+                    RequirementState = 'NOT_REQUIRED'
+                    AND EvidenceId IS NULL
+                    AND NotRequiredReason IS NOT NULL
+                    AND length(trim(NotRequiredReason)) > 0
+                )
+            ),
+
+            PRIMARY KEY
+            (
+                RequirementRevisionId,
+                RequirementKey
+            ),
+
+            FOREIGN KEY (RequirementRevisionId)
+                REFERENCES HLAS_Source_Evidence_Requirement_Revisions(
+                    RequirementRevisionId),
+
+            FOREIGN KEY (EvidenceId)
+                REFERENCES HLAS_Source_Evidence_Catalog(EvidenceId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
         }
         private static void CreateReadinessChecksTable(
     SqliteConnection connection,

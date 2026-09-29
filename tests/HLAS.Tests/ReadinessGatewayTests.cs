@@ -47,7 +47,17 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ReadinessGateStatus.Pass,
                     result.Items[0].GateStatus);
+                Assert.AreEqual(
+    ReadinessGateCode.SourceEvidence,
+    result.Items[1].GateCode);
 
+                Assert.AreEqual(
+                    ReadinessGateStatus.Blocked,
+                    result.Items[1].GateStatus);
+
+                Assert.AreEqual(
+                    "No governed Source Evidence Requirement revision exists.",
+                    result.Items[1].Detail);
                 for (int index = 1; index < 6; index++)
                 {
                     Assert.AreEqual(
@@ -255,6 +265,679 @@ namespace HLAS.Tests
                     ReadRecordCount(
                         projectRoot,
                         "HLAS_Readiness_Check_Items"));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Evaluate_SourceEvidenceNotRequiredRequirement_PassesSourceEvidenceGate()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                ProjectManifest manifest =
+                    ProjectPackageReader.Open(
+                        projectRoot);
+
+                string databasePath =
+                    Path.Combine(
+                        projectRoot,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder =
+                    new()
+                    {
+                        DataSource = databasePath,
+                        Mode = SqliteOpenMode.ReadWrite,
+                        Pooling = false
+                    };
+
+                string operationId =
+                    Guid.NewGuid().ToString("D");
+
+                string requirementRevisionId =
+                    Guid.NewGuid().ToString("D");
+
+                string timestamp =
+                    DateTimeOffset.UtcNow.ToString("O");
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                INSERT INTO HLAS_Governed_Operations
+                (
+                    OperationId,
+                    ProjectId,
+                    UserId,
+                    SeriesId,
+                    ProjectRole,
+                    StartedUtc,
+                    CompletedUtc,
+                    Outcome
+                )
+                VALUES
+                (
+                    $operationId,
+                    $projectId,
+                    $userId,
+                    'V',
+                    'Admin',
+                    $timestamp,
+                    $timestamp,
+                    'SUCCESS'
+                );
+
+                INSERT INTO HLAS_Source_Evidence_Requirement_Revisions
+                (
+                    RequirementRevisionId,
+                    RevisionNumber,
+                    PriorRequirementRevisionId,
+                    OperationId,
+                    ApprovedUtc
+                )
+                VALUES
+                (
+                    $requirementRevisionId,
+                    1,
+                    NULL,
+                    $operationId,
+                    $timestamp
+                );
+
+                INSERT INTO HLAS_Source_Evidence_Requirement_Items
+                (
+                    RequirementRevisionId,
+                    RequirementKey,
+                    RequirementState,
+                    EvidenceId,
+                    NotRequiredReason
+                )
+                VALUES
+                (
+                    $requirementRevisionId,
+                    'DEVELOPMENTAL_OPTIONAL_SOURCE',
+                    'NOT_REQUIRED',
+                    NULL,
+                    'Developmental governed NOT_REQUIRED proof.'
+                );
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$operationId",
+                        operationId);
+
+                    command.Parameters.AddWithValue(
+                        "$projectId",
+                        manifest.ProjectId.Value.ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$userId",
+                        Guid.NewGuid().ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$requirementRevisionId",
+                        requirementRevisionId);
+
+                    command.Parameters.AddWithValue(
+                        "$timestamp",
+                        timestamp);
+
+                    command.ExecuteNonQuery();
+                }
+
+                ReadinessCheckResult result =
+                    ReadinessGateway.Evaluate(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Technician);
+
+                Assert.AreEqual(
+                    ReadinessGateCode.SourceEvidence,
+                    result.Items[1].GateCode);
+
+                Assert.AreEqual(
+                    ReadinessGateStatus.Pass,
+                    result.Items[1].GateStatus);
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Evaluate_SourceEvidencePendingRequirement_BlocksSourceEvidenceGate()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                ProjectManifest manifest =
+                    ProjectPackageReader.Open(
+                        projectRoot);
+
+                string databasePath =
+                    Path.Combine(
+                        projectRoot,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder =
+                    new()
+                    {
+                        DataSource = databasePath,
+                        Mode = SqliteOpenMode.ReadWrite,
+                        Pooling = false
+                    };
+
+                string operationId =
+                    Guid.NewGuid().ToString("D");
+
+                string requirementRevisionId =
+                    Guid.NewGuid().ToString("D");
+
+                string timestamp =
+                    DateTimeOffset.UtcNow.ToString("O");
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                INSERT INTO HLAS_Governed_Operations
+                (
+                    OperationId,
+                    ProjectId,
+                    UserId,
+                    SeriesId,
+                    ProjectRole,
+                    StartedUtc,
+                    CompletedUtc,
+                    Outcome
+                )
+                VALUES
+                (
+                    $operationId,
+                    $projectId,
+                    $userId,
+                    'V',
+                    'Admin',
+                    $timestamp,
+                    $timestamp,
+                    'SUCCESS'
+                );
+
+                INSERT INTO HLAS_Source_Evidence_Requirement_Revisions
+                (
+                    RequirementRevisionId,
+                    RevisionNumber,
+                    PriorRequirementRevisionId,
+                    OperationId,
+                    ApprovedUtc
+                )
+                VALUES
+                (
+                    $requirementRevisionId,
+                    1,
+                    NULL,
+                    $operationId,
+                    $timestamp
+                );
+
+                INSERT INTO HLAS_Source_Evidence_Requirement_Items
+                (
+                    RequirementRevisionId,
+                    RequirementKey,
+                    RequirementState,
+                    EvidenceId,
+                    NotRequiredReason
+                )
+                VALUES
+                (
+                    $requirementRevisionId,
+                    'DEVELOPMENTAL_REQUIRED_SOURCE',
+                    'PENDING',
+                    NULL,
+                    NULL
+                );
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$operationId",
+                        operationId);
+
+                    command.Parameters.AddWithValue(
+                        "$projectId",
+                        manifest.ProjectId.Value.ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$userId",
+                        Guid.NewGuid().ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$requirementRevisionId",
+                        requirementRevisionId);
+
+                    command.Parameters.AddWithValue(
+                        "$timestamp",
+                        timestamp);
+
+                    command.ExecuteNonQuery();
+                }
+
+                ReadinessCheckResult result =
+                    ReadinessGateway.Evaluate(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Technician);
+
+                Assert.AreEqual(
+                    ReadinessGateCode.SourceEvidence,
+                    result.Items[1].GateCode);
+
+                Assert.AreEqual(
+                    ReadinessGateStatus.Blocked,
+                    result.Items[1].GateStatus);
+
+                Assert.AreEqual(
+                    "Required Source Evidence remains pending: DEVELOPMENTAL_REQUIRED_SOURCE.",
+                    result.Items[1].Detail);
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Evaluate_SourceEvidenceReceivedRequirementWithValidCustody_PassesSourceEvidenceGate()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string sourceFilePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Required Source.txt");
+
+            File.WriteAllText(
+                sourceFilePath,
+                "HLAS developmental required Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourceFilePath);
+
+                ProjectManifest manifest =
+                    ProjectPackageReader.Open(
+                        projectRoot);
+
+                string databasePath =
+                    Path.Combine(
+                        projectRoot,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder =
+                    new()
+                    {
+                        DataSource = databasePath,
+                        Mode = SqliteOpenMode.ReadWrite,
+                        Pooling = false
+                    };
+
+                string operationId =
+                    Guid.NewGuid().ToString("D");
+
+                string requirementRevisionId =
+                    Guid.NewGuid().ToString("D");
+
+                string timestamp =
+                    DateTimeOffset.UtcNow.ToString("O");
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                INSERT INTO HLAS_Governed_Operations
+                (
+                    OperationId,
+                    ProjectId,
+                    UserId,
+                    SeriesId,
+                    ProjectRole,
+                    StartedUtc,
+                    CompletedUtc,
+                    Outcome
+                )
+                VALUES
+                (
+                    $operationId,
+                    $projectId,
+                    $userId,
+                    'V',
+                    'Admin',
+                    $timestamp,
+                    $timestamp,
+                    'SUCCESS'
+                );
+
+                INSERT INTO HLAS_Source_Evidence_Requirement_Revisions
+                (
+                    RequirementRevisionId,
+                    RevisionNumber,
+                    PriorRequirementRevisionId,
+                    OperationId,
+                    ApprovedUtc
+                )
+                VALUES
+                (
+                    $requirementRevisionId,
+                    1,
+                    NULL,
+                    $operationId,
+                    $timestamp
+                );
+
+                INSERT INTO HLAS_Source_Evidence_Requirement_Items
+                (
+                    RequirementRevisionId,
+                    RequirementKey,
+                    RequirementState,
+                    EvidenceId,
+                    NotRequiredReason
+                )
+                VALUES
+                (
+                    $requirementRevisionId,
+                    'DEVELOPMENTAL_REQUIRED_SOURCE',
+                    'RECEIVED',
+                    $evidenceId,
+                    NULL
+                );
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$operationId",
+                        operationId);
+
+                    command.Parameters.AddWithValue(
+                        "$projectId",
+                        manifest.ProjectId.Value.ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$userId",
+                        Guid.NewGuid().ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$requirementRevisionId",
+                        requirementRevisionId);
+
+                    command.Parameters.AddWithValue(
+                        "$evidenceId",
+                        evidence.EvidenceId.Value.ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$timestamp",
+                        timestamp);
+
+                    command.ExecuteNonQuery();
+                }
+
+                ReadinessCheckResult result =
+                    ReadinessGateway.Evaluate(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Technician);
+
+                Assert.AreEqual(
+                    ReadinessGateCode.SourceEvidence,
+                    result.Items[1].GateCode);
+
+                Assert.AreEqual(
+                    ReadinessGateStatus.Pass,
+                    result.Items[1].GateStatus);
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Evaluate_SourceEvidenceReceivedRequirementWithTamperedCustody_BlocksSourceEvidenceGate()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string sourceFilePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Tampered Source.txt");
+
+            File.WriteAllText(
+                sourceFilePath,
+                "HLAS developmental original Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourceFilePath);
+
+                ProjectManifest manifest =
+                    ProjectPackageReader.Open(
+                        projectRoot);
+
+                string databasePath =
+                    Path.Combine(
+                        projectRoot,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder =
+                    new()
+                    {
+                        DataSource = databasePath,
+                        Mode = SqliteOpenMode.ReadWrite,
+                        Pooling = false
+                    };
+
+                string operationId =
+                    Guid.NewGuid().ToString("D");
+
+                string requirementRevisionId =
+                    Guid.NewGuid().ToString("D");
+
+                string timestamp =
+                    DateTimeOffset.UtcNow.ToString("O");
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                INSERT INTO HLAS_Governed_Operations
+                (
+                    OperationId,
+                    ProjectId,
+                    UserId,
+                    SeriesId,
+                    ProjectRole,
+                    StartedUtc,
+                    CompletedUtc,
+                    Outcome
+                )
+                VALUES
+                (
+                    $operationId,
+                    $projectId,
+                    $userId,
+                    'V',
+                    'Admin',
+                    $timestamp,
+                    $timestamp,
+                    'SUCCESS'
+                );
+
+                INSERT INTO HLAS_Source_Evidence_Requirement_Revisions
+                (
+                    RequirementRevisionId,
+                    RevisionNumber,
+                    PriorRequirementRevisionId,
+                    OperationId,
+                    ApprovedUtc
+                )
+                VALUES
+                (
+                    $requirementRevisionId,
+                    1,
+                    NULL,
+                    $operationId,
+                    $timestamp
+                );
+
+                INSERT INTO HLAS_Source_Evidence_Requirement_Items
+                (
+                    RequirementRevisionId,
+                    RequirementKey,
+                    RequirementState,
+                    EvidenceId,
+                    NotRequiredReason
+                )
+                VALUES
+                (
+                    $requirementRevisionId,
+                    'DEVELOPMENTAL_REQUIRED_SOURCE',
+                    'RECEIVED',
+                    $evidenceId,
+                    NULL
+                );
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$operationId",
+                        operationId);
+
+                    command.Parameters.AddWithValue(
+                        "$projectId",
+                        manifest.ProjectId.Value.ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$userId",
+                        Guid.NewGuid().ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$requirementRevisionId",
+                        requirementRevisionId);
+
+                    command.Parameters.AddWithValue(
+                        "$evidenceId",
+                        evidence.EvidenceId.Value.ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$timestamp",
+                        timestamp);
+
+                    command.ExecuteNonQuery();
+                }
+
+                string controlledFilePath =
+                    Path.Combine(
+                        projectRoot,
+                        evidence.RelativeCustodyPath);
+
+                File.WriteAllText(
+                    controlledFilePath,
+                    "Tampered controlled Source Evidence.");
+
+                ReadinessCheckResult result =
+                    ReadinessGateway.Evaluate(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Technician);
+
+                Assert.AreEqual(
+                    ReadinessGateStatus.Blocked,
+                    result.Items[1].GateStatus);
             }
             finally
             {
