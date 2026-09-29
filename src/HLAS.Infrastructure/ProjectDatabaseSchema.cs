@@ -15,7 +15,8 @@ namespace HLAS.Infrastructure
         public const int Version7 = 7;
         public const int Version8 = 8;
         public const int Version9 = 9;
-        public const int CurrentDatabaseSchemaVersion = Version9;
+        public const int Version10 = 10;
+        public const int CurrentDatabaseSchemaVersion = Version10;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -68,7 +69,13 @@ namespace HLAS.Infrastructure
             UpgradeSourceEvidenceMaintenanceToVersion9(
                 connection,
                 transaction);
+            CreateReadinessChecksTable(
+    connection,
+    transaction);
 
+            CreateReadinessCheckItemsTable(
+                connection,
+                transaction);
             UpgradeSourceEvidenceMetadataVersionsToVersion9(
                 connection,
                 transaction);
@@ -339,6 +346,136 @@ namespace HLAS.Infrastructure
                 transaction,
                 Version8,
                 Version9);
+        }
+        public static void MigrateVersion9ToVersion10(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version9)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 9 to Version 10 migration requires database schema version 9.");
+            }
+
+            CreateReadinessChecksTable(
+                connection,
+                transaction);
+
+            CreateReadinessCheckItemsTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version9,
+                Version10);
+        }
+        private static void CreateReadinessChecksTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Readiness_Checks
+        (
+            ReadinessCheckId TEXT NOT NULL
+                PRIMARY KEY,
+            OperationId TEXT NOT NULL
+                UNIQUE,
+            OverallStatus TEXT NOT NULL
+                CHECK
+                (
+                    OverallStatus IN
+                    (
+                        'READY',
+                        'NOT READY'
+                    )
+                ),
+            EvaluatedUtc TEXT NOT NULL,
+
+            FOREIGN KEY (OperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+
+        private static void CreateReadinessCheckItemsTable(
+            SqliteConnection connection,
+            SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Readiness_Check_Items
+        (
+            ReadinessCheckId TEXT NOT NULL,
+            GateSequence INTEGER NOT NULL
+                CHECK
+                (
+                    GateSequence >= 1
+                    AND GateSequence <= 7
+                ),
+            GateCode TEXT NOT NULL
+                CHECK
+                (
+                    GateCode IN
+                    (
+                        'PROJECT_IDENTITY',
+                        'SOURCE_EVIDENCE',
+                        'PROJECT_JMF_TRUTH',
+                        'MAINTENANCE',
+                        'PROJECT_JMF_REVIEW',
+                        'LINEAGE',
+                        'FREEZE_CAPABILITY'
+                    )
+                ),
+            GateStatus TEXT NOT NULL
+                CHECK
+                (
+                    GateStatus IN
+                    (
+                        'PASS',
+                        'BLOCKED'
+                    )
+                ),
+            Detail TEXT NULL,
+
+            PRIMARY KEY
+            (
+                ReadinessCheckId,
+                GateSequence
+            ),
+
+            UNIQUE
+            (
+                ReadinessCheckId,
+                GateCode
+            ),
+
+            FOREIGN KEY (ReadinessCheckId)
+                REFERENCES HLAS_Readiness_Checks(ReadinessCheckId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
         }
         private static void CreateFrozenStatesTable(
             SqliteConnection connection,
