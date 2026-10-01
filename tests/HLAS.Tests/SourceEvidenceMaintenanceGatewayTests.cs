@@ -1436,6 +1436,460 @@ namespace HLAS.Tests
                     testRoot);
             }
         }
+        [TestMethod]
+        public void RevalidateMaintenance_Success_PersistsExplicitOperationAndResolution()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string sourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Revalidation Source.txt");
+
+            File.WriteAllText(
+                sourcePath,
+                "HLAS developmental revalidation Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourcePath);
+
+                SourceEvidenceMaintenanceRecord maintenance =
+                    SourceEvidenceMaintenanceGateway.Correct(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        evidence.EvidenceId,
+                        new SourceEvidenceCorrectionRequest(
+                            SourceEvidenceMetadataMutation.Set(
+                                "Revalidation persistence label"),
+                            SourceEvidenceMetadataMutation.Keep(),
+                            "Developmental revalidation persistence proof"));
+
+                GovernedOperationRecord revalidation =
+                    SourceEvidenceMaintenanceGateway.RevalidateMaintenance(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        maintenance.OperationId);
+
+                Assert.AreNotEqual(
+                    maintenance.OperationId,
+                    revalidation.OperationId);
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance_Resolutions"));
+
+                string databasePath =
+                    Path.Combine(
+                        projectRoot,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder =
+                    new()
+                    {
+                        DataSource = databasePath,
+                        Mode = SqliteOpenMode.ReadOnly,
+                        Pooling = false
+                    };
+
+                using SqliteConnection connection =
+                    new(builder.ToString());
+
+                connection.Open();
+
+                using SqliteCommand command =
+                    connection.CreateCommand();
+
+                command.CommandText =
+                    """
+            SELECT
+                resolution.ResolutionOperationId,
+                resolution.ResolvedUtc,
+                operation.OperationKind,
+                operation.CompletedUtc,
+                operation.Outcome
+            FROM HLAS_Source_Evidence_Maintenance_Resolutions AS resolution
+            INNER JOIN HLAS_Governed_Operations AS operation
+                ON operation.OperationId = resolution.ResolutionOperationId
+            WHERE resolution.MaintenanceOperationId = $maintenanceOperationId;
+            """;
+
+                command.Parameters.AddWithValue(
+                    "$maintenanceOperationId",
+                    maintenance.OperationId.Value.ToString("D"));
+
+                using SqliteDataReader reader =
+                    command.ExecuteReader();
+
+                Assert.IsTrue(
+                    reader.Read());
+
+                Assert.AreEqual(
+                    revalidation.OperationId.Value.ToString("D"),
+                    reader.GetString(0));
+
+                Assert.IsTrue(
+                    DateTimeOffset.TryParse(
+                        reader.GetString(1),
+                        out _));
+
+                Assert.AreEqual(
+                    "SOURCE_EVIDENCE_MAINTENANCE_REVALIDATION",
+                    reader.GetString(2));
+
+                Assert.IsTrue(
+                    DateTimeOffset.TryParse(
+                        reader.GetString(3),
+                        out _));
+
+                Assert.AreEqual(
+                    "SUCCESS",
+                    reader.GetString(4));
+
+                Assert.IsFalse(
+                    reader.Read());
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void RevalidateMaintenance_AlreadyResolved_SafeStopsBeforeNewGovernedHistory()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string sourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Already Resolved Source.txt");
+
+            File.WriteAllText(
+                sourcePath,
+                "HLAS developmental already-resolved Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourcePath);
+
+                SourceEvidenceMaintenanceRecord maintenance =
+                    SourceEvidenceMaintenanceGateway.Correct(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        evidence.EvidenceId,
+                        new SourceEvidenceCorrectionRequest(
+                            SourceEvidenceMetadataMutation.Set(
+                                "Already resolved developmental label"),
+                            SourceEvidenceMetadataMutation.Keep(),
+                            "Developmental duplicate-resolution proof"));
+
+                _ = SourceEvidenceMaintenanceGateway.RevalidateMaintenance(
+                    projectRoot,
+                    UserId.CreateNew(),
+                    ProjectRole.Admin,
+                    maintenance.OperationId);
+
+                long operationCountBeforeSecondAttempt =
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Governed_Operations");
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => SourceEvidenceMaintenanceGateway.RevalidateMaintenance(
+                            projectRoot,
+                            UserId.CreateNew(),
+                            ProjectRole.Admin,
+                            maintenance.OperationId));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                Assert.AreEqual(
+                    operationCountBeforeSecondAttempt,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Governed_Operations"));
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance_Resolutions"));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void RevalidateMaintenance_ReplaceSuccess_PersistsResolution()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string priorSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Revalidation REPLACE Prior.txt");
+
+            string replacementSourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Revalidation REPLACE Successor.txt");
+
+            File.WriteAllText(
+                priorSourcePath,
+                "HLAS developmental revalidation REPLACE prior evidence.");
+
+            File.WriteAllText(
+                replacementSourcePath,
+                "HLAS developmental revalidation REPLACE successor evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord priorEvidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        priorSourcePath);
+
+                SourceEvidenceMaintenanceRecord maintenance =
+                    SourceEvidenceMaintenanceGateway.Replace(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        priorEvidence.EvidenceId,
+                        new SourceEvidenceReplacementRequest(
+                            replacementSourcePath,
+                            SourceEvidenceMetadataMutation.Keep(),
+                            SourceEvidenceMetadataMutation.Keep(),
+                            "Developmental REPLACE revalidation proof"));
+
+                GovernedOperationRecord revalidation =
+                    SourceEvidenceMaintenanceGateway.RevalidateMaintenance(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        maintenance.OperationId);
+
+                Assert.AreNotEqual(
+                    maintenance.OperationId,
+                    revalidation.OperationId);
+
+                Assert.AreEqual(
+                    1L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance_Resolutions"));
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void RevalidateMaintenance_ResolutionWriteFailure_RollsBackAndRecordsTechnicalFailure()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string sourcePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Failed Revalidation Source.txt");
+
+            File.WriteAllText(
+                sourcePath,
+                "HLAS developmental failed revalidation Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourcePath);
+
+                SourceEvidenceMaintenanceRecord maintenance =
+                    SourceEvidenceMaintenanceGateway.Correct(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        evidence.EvidenceId,
+                        new SourceEvidenceCorrectionRequest(
+                            SourceEvidenceMetadataMutation.Set(
+                                "Failed revalidation developmental label"),
+                            SourceEvidenceMetadataMutation.Keep(),
+                            "Developmental failed revalidation proof"));
+
+                string databasePath =
+                    Path.Combine(
+                        projectRoot,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder =
+                    new()
+                    {
+                        DataSource = databasePath,
+                        Mode = SqliteOpenMode.ReadWrite,
+                        Pooling = false
+                    };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                CREATE TRIGGER HLAS_Test_ForceMaintenanceResolutionFailure
+                BEFORE INSERT ON HLAS_Source_Evidence_Maintenance_Resolutions
+                BEGIN
+                    SELECT RAISE(
+                        ABORT,
+                        'forced developmental maintenance resolution failure');
+                END;
+                """;
+
+                    command.ExecuteNonQuery();
+                }
+
+                Assert.ThrowsExactly<SqliteException>(
+                    () => SourceEvidenceMaintenanceGateway.RevalidateMaintenance(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        maintenance.OperationId));
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance_Resolutions"));
+
+                using SqliteConnection verificationConnection =
+                    new(builder.ToString());
+
+                verificationConnection.Open();
+
+                using SqliteCommand verificationCommand =
+                    verificationConnection.CreateCommand();
+
+                verificationCommand.CommandText =
+                    """
+            SELECT
+                Outcome,
+                Decision
+            FROM HLAS_Governed_Operations
+            WHERE OperationKind = 'SOURCE_EVIDENCE_MAINTENANCE_REVALIDATION';
+            """;
+
+                using SqliteDataReader reader =
+                    verificationCommand.ExecuteReader();
+
+                Assert.IsTrue(
+                    reader.Read());
+
+                Assert.AreEqual(
+                    "TECHNICAL FAILURE",
+                    reader.GetString(0));
+
+                Assert.AreEqual(
+                    "MAINTENANCE REVALIDATION TECHNICAL FAILURE",
+                    reader.GetString(1));
+
+                Assert.IsFalse(
+                    reader.Read());
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
         private static void VerifyStoredReplaceState(
     string projectRoot,
     SourceEvidenceMaintenanceRecord result)
@@ -1577,20 +2031,31 @@ namespace HLAS.Tests
                 connection.CreateCommand();
 
             operationCommand.CommandText =
-                """
-        SELECT Outcome
-        FROM HLAS_Governed_Operations
-        WHERE OperationId = $operationId;
-        """;
+     """
+    SELECT
+        Outcome,
+        OperationKind
+    FROM HLAS_Governed_Operations
+    WHERE OperationId = $operationId;
+    """;
 
             operationCommand.Parameters.AddWithValue(
                 "$operationId",
                 result.OperationId.Value.ToString("D"));
 
+            using SqliteDataReader operationReader =
+    operationCommand.ExecuteReader();
+
+            Assert.IsTrue(
+                operationReader.Read());
+
             Assert.AreEqual(
                 "SUCCESS",
-                Convert.ToString(
-                    operationCommand.ExecuteScalar()));
+                operationReader.GetString(0));
+
+            Assert.AreEqual(
+               "SOURCE_EVIDENCE_REPLACE",
+                operationReader.GetString(1));
         }
         private static void VerifyReplaceKeepClearTemporalState(
     string projectRoot,
@@ -1912,20 +2377,31 @@ namespace HLAS.Tests
                 connection.CreateCommand();
 
             operationCommand.CommandText =
-                """
-        SELECT Outcome
-        FROM HLAS_Governed_Operations
-        WHERE OperationId = $operationId;
-        """;
+      """
+    SELECT
+        Outcome,
+        OperationKind
+    FROM HLAS_Governed_Operations
+    WHERE OperationId = $operationId;
+    """;
 
             operationCommand.Parameters.AddWithValue(
                 "$operationId",
                 operationId.Value.ToString("D"));
 
+            using SqliteDataReader operationReader =
+    operationCommand.ExecuteReader();
+
+            Assert.IsTrue(
+                operationReader.Read());
+
             Assert.AreEqual(
                 "SUCCESS",
-                Convert.ToString(
-                    operationCommand.ExecuteScalar()));
+                operationReader.GetString(0));
+
+            Assert.AreEqual(
+               "SOURCE_EVIDENCE_CORRECT",
+                operationReader.GetString(1));
         }
 
         private static long ReadRecordCount(

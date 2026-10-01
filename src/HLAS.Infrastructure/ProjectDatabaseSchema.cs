@@ -18,7 +18,8 @@ namespace HLAS.Infrastructure
         public const int Version10 = 10;
         public const int Version11 = 11;
         public const int Version12 = 12;
-        public const int CurrentDatabaseSchemaVersion = Version12;
+        public const int Version13 = 13;
+        public const int CurrentDatabaseSchemaVersion = Version13;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -98,6 +99,13 @@ namespace HLAS.Infrastructure
                 transaction);
 
             CreateProjectJmfReviewItemsTable(
+                connection,
+                transaction);
+            AddGovernedOperationKindForVersion13(
+    connection,
+    transaction);
+
+            CreateSourceEvidenceMaintenanceResolutionsTable(
                 connection,
                 transaction);
             UpgradeSourceEvidenceMetadataVersionsToVersion9(
@@ -474,6 +482,92 @@ namespace HLAS.Infrastructure
                 transaction,
                 Version11,
                 Version12);
+        }
+        public static void MigrateVersion12ToVersion13(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version12)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 12 to Version 13 migration requires database schema version 12.");
+            }
+
+            AddGovernedOperationKindForVersion13(
+                connection,
+                transaction);
+
+            CreateSourceEvidenceMaintenanceResolutionsTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version12,
+                Version13);
+        }
+        private static void AddGovernedOperationKindForVersion13(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        ALTER TABLE HLAS_Governed_Operations
+        ADD COLUMN OperationKind TEXT NULL
+            CHECK
+            (
+                OperationKind IS NULL
+                OR length(trim(OperationKind)) > 0
+            );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateSourceEvidenceMaintenanceResolutionsTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Source_Evidence_Maintenance_Resolutions
+        (
+            MaintenanceOperationId TEXT NOT NULL
+                PRIMARY KEY,
+            ResolutionOperationId TEXT NOT NULL
+                UNIQUE,
+            ResolvedUtc TEXT NOT NULL,
+
+            CHECK
+            (
+                MaintenanceOperationId <> ResolutionOperationId
+            ),
+
+            FOREIGN KEY (MaintenanceOperationId)
+                REFERENCES HLAS_Source_Evidence_Maintenance(OperationId),
+
+            FOREIGN KEY (ResolutionOperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
         }
         private static void CreateSourceEvidenceRequirementRevisionsTable(
     SqliteConnection connection,

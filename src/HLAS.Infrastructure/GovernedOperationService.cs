@@ -11,9 +11,19 @@ namespace HLAS.Infrastructure
             string projectRoot,
             ProjectId projectId,
             UserId userId,
-            SeriesId seriesId,
-            ProjectRole projectRole)
+           SeriesId seriesId,
+ProjectRole projectRole,
+string? operationKind = null)
+
+
         {
+            if (operationKind is not null &&
+    string.IsNullOrWhiteSpace(operationKind))
+            {
+                throw new ArgumentException(
+                    "OperationKind may be null or nonblank.",
+                    nameof(operationKind));
+            }
             ProjectManifest manifest =
                 ProjectPackageReader.Open(projectRoot);
 
@@ -55,8 +65,9 @@ namespace HLAS.Infrastructure
                         UserId,
                         SeriesId,
                         ProjectRole,
-                        StartedUtc,
-                        CompletedUtc,
+                StartedUtc,
+                OperationKind,
+                CompletedUtc,
                         Outcome,
                         Decision,
                         Reason
@@ -67,12 +78,13 @@ namespace HLAS.Infrastructure
                         $projectId,
                         $userId,
                         $seriesId,
-                        $projectRole,
-                        $startedUtc,
-                        NULL,
-                        NULL,
-                        NULL,
-                        NULL
+                       $projectRole,
+                $startedUtc,
+                $operationKind,
+                NULL,
+                NULL,
+                NULL,
+                NULL
                     );
                 """;
 
@@ -99,7 +111,11 @@ namespace HLAS.Infrastructure
             command.Parameters.AddWithValue(
                 "$startedUtc",
                 operation.StartedUtc.Value.ToString("O"));
-
+            command.Parameters.AddWithValue(
+    "$operationKind",
+    operationKind is null
+        ? DBNull.Value
+        : operationKind);
             command.ExecuteNonQuery();
 
             transaction.Commit();

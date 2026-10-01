@@ -58,7 +58,8 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     operation.StartedUtc.Value.ToString("O"),
                     persisted.StartedUtc);
-
+                Assert.IsNull(
+    persisted.OperationKind);
                 Assert.IsNull(
                     persisted.CompletedUtc);
 
@@ -76,7 +77,39 @@ namespace HLAS.Tests
                 DeleteTemporaryProjectRoot(projectRoot);
             }
         }
+        [TestMethod]
+        public void Begin_ExplicitOperationKind_PersistsExactKind()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
 
+            try
+            {
+                ProjectManifest manifest =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                GovernedOperationRecord operation =
+                    GovernedOperationService.Begin(
+                        projectRoot,
+                        manifest.ProjectId,
+                        UserId.CreateNew(),
+                        SeriesId.V,
+                        ProjectRole.Admin,
+                        "SOURCE_EVIDENCE_CORRECT");
+
+                OperationDatabaseRecord persisted =
+                    ReadOperation(
+                        projectRoot,
+                        operation.OperationId);
+
+                Assert.AreEqual(
+                    "SOURCE_EVIDENCE_CORRECT",
+                    persisted.OperationKind);
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
         [TestMethod]
         public void Begin_ProjectIdMismatch_SafeStopsWithoutAttempt()
         {
@@ -376,8 +409,8 @@ namespace HLAS.Tests
         }
 
         private static OperationDatabaseRecord ReadOperation(
-            string projectRoot,
-            OperationId operationId)
+     string projectRoot,
+     OperationId operationId)
         {
             string databasePath = Path.Combine(
                 projectRoot,
@@ -393,20 +426,21 @@ namespace HLAS.Tests
 
             command.CommandText =
                 """
-                SELECT
-                    OperationId,
-                    ProjectId,
-                    UserId,
-                    SeriesId,
-                    ProjectRole,
-                    StartedUtc,
-                    CompletedUtc,
-                    Outcome,
-                    Decision,
-                    Reason
-                FROM HLAS_Governed_Operations
-                WHERE OperationId = $operationId;
-                """;
+        SELECT
+            OperationId,
+            ProjectId,
+            UserId,
+            SeriesId,
+            ProjectRole,
+            StartedUtc,
+            OperationKind,
+            CompletedUtc,
+            Outcome,
+            Decision,
+            Reason
+        FROM HLAS_Governed_Operations
+        WHERE OperationId = $operationId;
+        """;
 
             command.Parameters.AddWithValue(
                 "$operationId",
@@ -439,7 +473,10 @@ namespace HLAS.Tests
                     : reader.GetString(8),
                 reader.IsDBNull(9)
                     ? null
-                    : reader.GetString(9));
+                    : reader.GetString(9),
+                reader.IsDBNull(10)
+                    ? null
+                    : reader.GetString(10));
         }
 
         private static long ReadOperationCount(
@@ -509,6 +546,7 @@ namespace HLAS.Tests
             string SeriesId,
             string ProjectRole,
             string StartedUtc,
+            string? OperationKind,
             string? CompletedUtc,
             string? Outcome,
             string? Decision,

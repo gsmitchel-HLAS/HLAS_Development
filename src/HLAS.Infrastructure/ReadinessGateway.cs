@@ -55,12 +55,9 @@ namespace HLAS.Infrastructure
     fullProjectRoot,
     readinessCheckId),
 
-                    new ReadinessCheckItemRecord(
-                        readinessCheckId,
-                        4,
-                        ReadinessGateCode.Maintenance,
-                        ReadinessGateStatus.Blocked,
-                        "Unresolved governed maintenance evaluation is not yet implemented."),
+                   EvaluateMaintenance(
+    fullProjectRoot,
+    readinessCheckId),
 
                   EvaluateProjectJmfReview(
     fullProjectRoot,
@@ -148,6 +145,108 @@ namespace HLAS.Infrastructure
 
                 throw;
             }
+        }
+        private static ReadinessCheckItemRecord EvaluateMaintenance(
+    string fullProjectRoot,
+    ReadinessCheckId readinessCheckId)
+        {
+            string databasePath =
+                Path.Combine(
+                    fullProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+            SqliteConnectionStringBuilder builder =
+                new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadOnly,
+                    Pooling = false
+                };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            using (SqliteCommand openOperationCommand =
+                connection.CreateCommand())
+            {
+                openOperationCommand.CommandText =
+                    """
+            SELECT COUNT(*)
+            FROM HLAS_Governed_Operations
+            WHERE
+                CompletedUtc IS NULL
+                AND Outcome IS NULL
+                AND OperationKind IN
+                (
+                    'SOURCE_EVIDENCE_CORRECT',
+                    'SOURCE_EVIDENCE_REPLACE',
+                    'SOURCE_EVIDENCE_MAINTENANCE_REVALIDATION'
+                );
+            """;
+
+                long openOperationCount =
+                    Convert.ToInt64(
+                        openOperationCommand.ExecuteScalar());
+
+                if (openOperationCount > 0)
+                {
+                    return new ReadinessCheckItemRecord(
+                        readinessCheckId,
+                        4,
+                        ReadinessGateCode.Maintenance,
+                        ReadinessGateStatus.Blocked,
+                        "A governed Source Evidence maintenance or revalidation operation remains open.");
+                }
+            }
+
+            using SqliteCommand unresolvedCommand =
+                connection.CreateCommand();
+
+            unresolvedCommand.CommandText =
+                """
+        SELECT COUNT(*)
+        FROM HLAS_Source_Evidence_Maintenance AS maintenance
+        INNER JOIN HLAS_Governed_Operations AS maintenanceOperation
+            ON maintenanceOperation.OperationId = maintenance.OperationId
+        LEFT JOIN HLAS_Source_Evidence_Maintenance_Resolutions AS resolution
+            ON resolution.MaintenanceOperationId = maintenance.OperationId
+        LEFT JOIN HLAS_Governed_Operations AS resolutionOperation
+            ON resolutionOperation.OperationId = resolution.ResolutionOperationId
+        WHERE
+            maintenanceOperation.Outcome = 'SUCCESS'
+            AND
+            (
+                resolution.MaintenanceOperationId IS NULL
+                OR resolutionOperation.OperationKind IS NULL
+                OR resolutionOperation.OperationKind <> 'SOURCE_EVIDENCE_MAINTENANCE_REVALIDATION'
+                OR resolutionOperation.CompletedUtc IS NULL
+                OR resolutionOperation.Outcome IS NULL
+                OR resolutionOperation.Outcome <> 'SUCCESS'
+            );
+        """;
+
+            long unresolvedMaintenanceCount =
+                Convert.ToInt64(
+                    unresolvedCommand.ExecuteScalar());
+
+            if (unresolvedMaintenanceCount > 0)
+            {
+                return new ReadinessCheckItemRecord(
+                    readinessCheckId,
+                    4,
+                    ReadinessGateCode.Maintenance,
+                    ReadinessGateStatus.Blocked,
+                    "One or more successful governed Source Evidence maintenance operations remain unresolved or have not completed governed revalidation.");
+            }
+
+            return new ReadinessCheckItemRecord(
+                readinessCheckId,
+                4,
+                ReadinessGateCode.Maintenance,
+                ReadinessGateStatus.Pass,
+                "No unresolved governed Source Evidence maintenance remains.");
         }
         private static ReadinessCheckItemRecord EvaluateProjectJmfTruth(
     string fullProjectRoot,

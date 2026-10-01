@@ -1,7 +1,8 @@
-﻿using System.IO;
-using System.Security.Cryptography;
-using HLAS.Domain;
+﻿using HLAS.Domain;
 using Microsoft.Data.Sqlite;
+using System.IO;
+using System.Numerics;
+using System.Security.Cryptography;
 namespace HLAS.Infrastructure
 {
     public enum SourceEvidenceMetadataMutationAction
@@ -142,12 +143,13 @@ namespace HLAS.Infrastructure
                     "SAFE-STOP: CORRECT must change at least one approved metadata field.");
             }
             GovernedOperationRecord operation =
-    GovernedOperationService.Begin(
-        fullProjectRoot,
-        manifest.ProjectId,
-        userId,
-        SeriesId.V,
-        projectRole);
+      GovernedOperationService.Begin(
+          fullProjectRoot,
+          manifest.ProjectId,
+          userId,
+          SeriesId.V,
+          projectRole,
+          "SOURCE_EVIDENCE_CORRECT");
 
             try
             {
@@ -318,14 +320,16 @@ namespace HLAS.Infrastructure
                     request.AdministrativeDescription);
 
             GovernedOperationRecord operation =
-                GovernedOperationService.Begin(
-                    fullProjectRoot,
-                    manifest.ProjectId,
-                    userId,
-                    SeriesId.V,
-                    projectRole);
+     GovernedOperationService.Begin(
+         fullProjectRoot,
+         manifest.ProjectId,
+         userId,
+         SeriesId.V,
+         projectRole,
+         "SOURCE_EVIDENCE_REPLACE");
 
-            EvidenceId resultingEvidenceId =
+
+                        EvidenceId resultingEvidenceId =
                 EvidenceId.CreateNew();
 
             string resultingEvidenceDirectoryPath =
@@ -511,6 +515,94 @@ namespace HLAS.Infrastructure
                         exception))
                 {
                     throw recordedException;
+                }
+
+                throw;
+            }
+        }
+        public static GovernedOperationRecord RevalidateMaintenance(
+    string projectRoot,
+    UserId userId,
+    ProjectRole projectRole,
+    OperationId maintenanceOperationId)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+
+            string fullProjectRoot =
+                Path.GetFullPath(projectRoot);
+
+            ProjectManifest manifest =
+                ProjectPackageReader.Open(
+                    fullProjectRoot);
+
+            VerifyMaintenanceCanBeResolved(
+                fullProjectRoot,
+                maintenanceOperationId);
+
+            GovernedOperationRecord operation =
+                GovernedOperationService.Begin(
+                    fullProjectRoot,
+                    manifest.ProjectId,
+                    userId,
+                    SeriesId.V,
+                    projectRole,
+                    "SOURCE_EVIDENCE_MAINTENANCE_REVALIDATION");
+
+            try
+            {
+                VerifyMaintenanceArtifactsForRevalidation(
+                    fullProjectRoot,
+                    maintenanceOperationId);
+
+                GovernedTimestamp resolvedUtc =
+                    GovernedTimestamp.CreateNow();
+
+                using SqliteConnection connection =
+                    OpenDatabase(fullProjectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InsertMaintenanceResolutionRecord(
+                    connection,
+                    transaction,
+                    maintenanceOperationId,
+                    operation.OperationId,
+                    resolvedUtc);
+
+                GovernedOperationService.FinalizeSuccessInTransaction(
+                    connection,
+                    transaction,
+                    operation.OperationId);
+
+                transaction.Commit();
+
+                return operation;
+            }
+            catch (Exception exception)
+            {
+                DecisionRecord decisionRecord =
+                    new(
+                        IsSafeStopException(exception)
+                            ? "MAINTENANCE REVALIDATION SAFE-STOP"
+                            : "MAINTENANCE REVALIDATION TECHNICAL FAILURE",
+                        exception.Message);
+
+                if (IsSafeStopException(exception))
+                {
+                    GovernedOperationService.FinalizeSafeStop(
+                        fullProjectRoot,
+                        operation.OperationId,
+                        decisionRecord);
+                }
+                else
+                {
+                    GovernedOperationService.FinalizeTechnicalFailure(
+                        fullProjectRoot,
+                        operation.OperationId,
+                        decisionRecord);
                 }
 
                 throw;
@@ -1080,7 +1172,311 @@ namespace HLAS.Infrastructure
             .ToHexString(hash)
             .ToLowerInvariant();
     }
-    private static void InsertMaintenanceRecord(
+        private static void VerifyMaintenanceArtifactsForRevalidation(
+    string fullProjectRoot,
+    OperationId maintenanceOperationId)
+        {
+            string databasePath =
+                Path.Combine(
+                    fullProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+            SqliteConnectionStringBuilder builder =
+                new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadOnly,
+                    Pooling = false
+                };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            string maintenanceType;
+            string priorEvidenceId;
+            string resultingEvidenceId;
+
+            using (SqliteCommand maintenanceCommand =
+                connection.CreateCommand())
+            {
+                maintenanceCommand.CommandText =
+                    """
+            SELECT
+                maintenance.MaintenanceType,
+                maintenance.PriorEvidenceId,
+                maintenance.ResultingEvidenceId,
+                freeze.OperationId,
+                freeze.TargetEvidenceId,
+                freeze.FreezeType
+            FROM HLAS_Source_Evidence_Maintenance AS maintenance
+            INNER JOIN HLAS_Frozen_States AS freeze
+                ON freeze.FreezeId = maintenance.FreezeId
+            WHERE maintenance.OperationId = $maintenanceOperationId;
+            """;
+
+                maintenanceCommand.Parameters.AddWithValue(
+                    "$maintenanceOperationId",
+                    maintenanceOperationId.Value.ToString("D"));
+
+                using SqliteDataReader reader =
+                    maintenanceCommand.ExecuteReader();
+
+                if (!reader.Read())
+                {
+                    throw new InvalidOperationException(
+                        "SAFE-STOP: Governed maintenance artifacts are incomplete.");
+                }
+
+                maintenanceType =
+                    reader.GetString(0);
+
+                priorEvidenceId =
+                    reader.GetString(1);
+
+                resultingEvidenceId =
+                    reader.GetString(2);
+
+                if (!string.Equals(
+                        reader.GetString(3),
+                        maintenanceOperationId.Value.ToString("D"),
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(
+                        reader.GetString(4),
+                        priorEvidenceId,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(
+                        reader.GetString(5),
+                        "PRE-CHANGE",
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "SAFE-STOP: Governed maintenance Pre-Change Freeze lineage is inconsistent.");
+                }
+            }
+
+            using (SqliteCommand metadataCommand =
+                connection.CreateCommand())
+            {
+                metadataCommand.CommandText =
+                    """
+            SELECT COUNT(*)
+            FROM HLAS_Source_Evidence_Metadata_Versions
+            WHERE
+                OperationId = $maintenanceOperationId
+                AND EvidenceId = $resultingEvidenceId;
+            """;
+
+                metadataCommand.Parameters.AddWithValue(
+                    "$maintenanceOperationId",
+                    maintenanceOperationId.Value.ToString("D"));
+
+                metadataCommand.Parameters.AddWithValue(
+                    "$resultingEvidenceId",
+                    resultingEvidenceId);
+
+                if (Convert.ToInt64(
+                        metadataCommand.ExecuteScalar()) != 1)
+                {
+                    throw new InvalidOperationException(
+                        "SAFE-STOP: Governed maintenance metadata-version lineage is incomplete.");
+                }
+            }
+
+            if (string.Equals(
+                    maintenanceType,
+                    "CORRECT",
+                    StringComparison.Ordinal))
+            {
+                if (!string.Equals(
+                        priorEvidenceId,
+                        resultingEvidenceId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "SAFE-STOP: CORRECT maintenance EvidenceId lineage is inconsistent.");
+                }
+
+                using SqliteCommand changeCommand =
+                    connection.CreateCommand();
+
+                changeCommand.CommandText =
+                    """
+            SELECT COUNT(*)
+            FROM HLAS_Source_Evidence_Maintenance_Changes
+            WHERE OperationId = $maintenanceOperationId;
+            """;
+
+                changeCommand.Parameters.AddWithValue(
+                    "$maintenanceOperationId",
+                    maintenanceOperationId.Value.ToString("D"));
+
+                if (Convert.ToInt64(
+                        changeCommand.ExecuteScalar()) < 1)
+                {
+                    throw new InvalidOperationException(
+                        "SAFE-STOP: CORRECT maintenance contains no governed change history.");
+                }
+
+                return;
+            }
+
+            if (string.Equals(
+                    maintenanceType,
+                    "REPLACE",
+                    StringComparison.Ordinal))
+            {
+                if (string.Equals(
+                        priorEvidenceId,
+                        resultingEvidenceId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "SAFE-STOP: REPLACE maintenance EvidenceId lineage is inconsistent.");
+                }
+
+                using SqliteCommand successorCommand =
+                    connection.CreateCommand();
+
+                successorCommand.CommandText =
+                    """
+            SELECT COUNT(*)
+            FROM HLAS_Evidence_Custody AS custody
+            INNER JOIN HLAS_Source_Evidence_Catalog AS catalog
+                ON catalog.EvidenceId = custody.EvidenceId
+            WHERE custody.EvidenceId = $resultingEvidenceId;
+            """;
+
+                successorCommand.Parameters.AddWithValue(
+                    "$resultingEvidenceId",
+                    resultingEvidenceId);
+
+                if (Convert.ToInt64(
+                        successorCommand.ExecuteScalar()) != 1)
+                {
+                    throw new InvalidOperationException(
+                        "SAFE-STOP: REPLACE successor custody/catalog lineage is incomplete.");
+                }
+
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "SAFE-STOP: Governed Source Evidence maintenance type is unsupported.");
+        }
+        private static void VerifyMaintenanceCanBeResolved(
+    string fullProjectRoot,
+    OperationId maintenanceOperationId)
+        {
+            string databasePath =
+                Path.Combine(
+                    fullProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+            SqliteConnectionStringBuilder builder =
+                new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadOnly,
+                    Pooling = false
+                };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.CommandText =
+                """
+        SELECT
+            operation.CompletedUtc,
+            operation.Outcome,
+            resolution.MaintenanceOperationId
+        FROM HLAS_Source_Evidence_Maintenance AS maintenance
+        INNER JOIN HLAS_Governed_Operations AS operation
+            ON operation.OperationId = maintenance.OperationId
+        LEFT JOIN HLAS_Source_Evidence_Maintenance_Resolutions AS resolution
+            ON resolution.MaintenanceOperationId = maintenance.OperationId
+        WHERE maintenance.OperationId = $maintenanceOperationId;
+        """;
+
+            command.Parameters.AddWithValue(
+                "$maintenanceOperationId",
+                maintenanceOperationId.Value.ToString("D"));
+
+            using SqliteDataReader reader =
+                command.ExecuteReader();
+
+            if (!reader.Read())
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: The governed Source Evidence maintenance operation was not found.");
+            }
+
+            if (reader.IsDBNull(0) ||
+                reader.IsDBNull(1) ||
+                !string.Equals(
+                    reader.GetString(1),
+                    "SUCCESS",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Only completed successful Source Evidence maintenance may be revalidated.");
+            }
+
+            if (!reader.IsDBNull(2))
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: The governed Source Evidence maintenance operation is already resolved.");
+            }
+        }
+        private static void InsertMaintenanceResolutionRecord(
+    SqliteConnection connection,
+    SqliteTransaction transaction,
+    OperationId maintenanceOperationId,
+    OperationId resolutionOperationId,
+    GovernedTimestamp resolvedUtc)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+
+            command.CommandText =
+                """
+        INSERT INTO HLAS_Source_Evidence_Maintenance_Resolutions
+        (
+            MaintenanceOperationId,
+            ResolutionOperationId,
+            ResolvedUtc
+        )
+        VALUES
+        (
+            $maintenanceOperationId,
+            $resolutionOperationId,
+            $resolvedUtc
+        );
+        """;
+
+            command.Parameters.AddWithValue(
+                "$maintenanceOperationId",
+                maintenanceOperationId.Value.ToString("D"));
+
+            command.Parameters.AddWithValue(
+                "$resolutionOperationId",
+                resolutionOperationId.Value.ToString("D"));
+
+            command.Parameters.AddWithValue(
+                "$resolvedUtc",
+                resolvedUtc.Value.ToString("O"));
+
+            command.ExecuteNonQuery();
+        }
+        private static void InsertMaintenanceRecord(
     SqliteConnection connection,
     SqliteTransaction transaction,
     SourceEvidenceMaintenanceRecord record)

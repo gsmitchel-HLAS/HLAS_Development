@@ -63,8 +63,8 @@ namespace HLAS.Tests
      result.Items[2].GateStatus);
 
                 Assert.AreEqual(
-                    ReadinessGateStatus.Blocked,
-                    result.Items[3].GateStatus);
+     ReadinessGateStatus.Pass,
+     result.Items[3].GateStatus);
 
                 Assert.AreEqual(
                     ReadinessGateStatus.Pass,
@@ -1229,6 +1229,314 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ReadinessGateStatus.Pass,
                     result.Items[4].GateStatus);
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Evaluate_OpenMaintenanceOperation_BlocksMaintenanceGate()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                ProjectManifest manifest =
+                    ProjectPackageReader.Open(
+                        projectRoot);
+
+                _ = GovernedOperationService.Begin(
+                    projectRoot,
+                    manifest.ProjectId,
+                    UserId.CreateNew(),
+                    SeriesId.V,
+                    ProjectRole.Admin,
+                    "SOURCE_EVIDENCE_CORRECT");
+
+                ReadinessCheckResult result =
+                    ReadinessGateway.Evaluate(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Technician);
+
+                Assert.AreEqual(
+                    ReadinessGateCode.Maintenance,
+                    result.Items[3].GateCode);
+
+                Assert.AreEqual(
+                    ReadinessGateStatus.Blocked,
+                    result.Items[3].GateStatus);
+
+                Assert.AreEqual(
+                    "A governed Source Evidence maintenance or revalidation operation remains open.",
+                    result.Items[3].Detail);
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Evaluate_SuccessfulMaintenanceWithoutResolution_BlocksMaintenanceGate()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string sourceFilePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Maintenance Source.txt");
+
+            File.WriteAllText(
+                sourceFilePath,
+                "HLAS developmental maintenance Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourceFilePath);
+
+                _ = SourceEvidenceMaintenanceGateway.Correct(
+                    projectRoot,
+                    UserId.CreateNew(),
+                    ProjectRole.Admin,
+                    evidence.EvidenceId,
+                    new SourceEvidenceCorrectionRequest(
+                        SourceEvidenceMetadataMutation.Set(
+                            "Maintenance gate developmental label"),
+                        SourceEvidenceMetadataMutation.Keep(),
+                        "Developmental unresolved maintenance proof"));
+
+                ReadinessCheckResult result =
+                    ReadinessGateway.Evaluate(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Technician);
+
+                Assert.AreEqual(
+                    ReadinessGateCode.Maintenance,
+                    result.Items[3].GateCode);
+
+                Assert.AreEqual(
+                    ReadinessGateStatus.Blocked,
+                    result.Items[3].GateStatus);
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Evaluate_FailedMaintenanceWithoutAcceptedRecord_DoesNotBlockMaintenanceGate()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string sourceFilePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Failed Maintenance Source.txt");
+
+            File.WriteAllText(
+                sourceFilePath,
+                "HLAS developmental failed maintenance Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourceFilePath);
+
+                string databasePath =
+                    Path.Combine(
+                        projectRoot,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder =
+                    new()
+                    {
+                        DataSource = databasePath,
+                        Mode = SqliteOpenMode.ReadWrite,
+                        Pooling = false
+                    };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                CREATE TRIGGER HLAS_Test_ForceReadinessMaintenanceFailure
+                BEFORE INSERT ON HLAS_Source_Evidence_Maintenance
+                BEGIN
+                    SELECT RAISE(
+                        ABORT,
+                        'forced developmental maintenance failure');
+                END;
+                """;
+
+                    command.ExecuteNonQuery();
+                }
+
+                Assert.ThrowsExactly<SqliteException>(
+                    () => SourceEvidenceMaintenanceGateway.Correct(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        evidence.EvidenceId,
+                        new SourceEvidenceCorrectionRequest(
+                            SourceEvidenceMetadataMutation.Set(
+                                "Failed maintenance developmental label"),
+                            SourceEvidenceMetadataMutation.Keep(),
+                            "Developmental failed maintenance readiness proof")));
+
+                Assert.AreEqual(
+                    0L,
+                    ReadRecordCount(
+                        projectRoot,
+                        "HLAS_Source_Evidence_Maintenance"));
+
+                ReadinessCheckResult result =
+                    ReadinessGateway.Evaluate(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Technician);
+
+                Assert.AreEqual(
+                    ReadinessGateCode.Maintenance,
+                    result.Items[3].GateCode);
+
+                Assert.AreEqual(
+                    ReadinessGateStatus.Pass,
+                    result.Items[3].GateStatus);
+            }
+            finally
+            {
+                DeleteTemporaryTestRoot(
+                    testRoot);
+            }
+        }
+        [TestMethod]
+        public void Evaluate_RevalidatedMaintenance_PassesMaintenanceGate()
+        {
+            string testRoot =
+                CreateTemporaryTestRoot();
+
+            string projectRoot =
+                Path.Combine(
+                    testRoot,
+                    "Project");
+
+            string sourceDirectory =
+                Path.Combine(
+                    testRoot,
+                    "Original");
+
+            Directory.CreateDirectory(
+                sourceDirectory);
+
+            string sourceFilePath =
+                Path.Combine(
+                    sourceDirectory,
+                    "Developmental Revalidated Maintenance Source.txt");
+
+            File.WriteAllText(
+                sourceFilePath,
+                "HLAS developmental revalidated maintenance Source Evidence.");
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(
+                    projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourceFilePath);
+
+                SourceEvidenceMaintenanceRecord maintenance =
+                    SourceEvidenceMaintenanceGateway.Correct(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin,
+                        evidence.EvidenceId,
+                        new SourceEvidenceCorrectionRequest(
+                            SourceEvidenceMetadataMutation.Set(
+                                "Revalidated maintenance developmental label"),
+                            SourceEvidenceMetadataMutation.Keep(),
+                            "Developmental maintenance revalidation proof"));
+
+                _ = SourceEvidenceMaintenanceGateway.RevalidateMaintenance(
+                    projectRoot,
+                    UserId.CreateNew(),
+                    ProjectRole.Admin,
+                    maintenance.OperationId);
+
+                ReadinessCheckResult result =
+                    ReadinessGateway.Evaluate(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Technician);
+
+                Assert.AreEqual(
+                    ReadinessGateCode.Maintenance,
+                    result.Items[3].GateCode);
+
+                Assert.AreEqual(
+                    ReadinessGateStatus.Pass,
+                    result.Items[3].GateStatus);
             }
             finally
             {
