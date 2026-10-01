@@ -51,12 +51,9 @@ namespace HLAS.Infrastructure
     fullProjectRoot,
     readinessCheckId),
 
-                    new ReadinessCheckItemRecord(
-                        readinessCheckId,
-                        3,
-                        ReadinessGateCode.ProjectJmfTruth,
-                        ReadinessGateStatus.Blocked,
-                        "Project/JMF governed truth is not yet represented completely in the C# project database."),
+                   EvaluateProjectJmfTruth(
+    fullProjectRoot,
+    readinessCheckId),
 
                     new ReadinessCheckItemRecord(
                         readinessCheckId,
@@ -65,13 +62,9 @@ namespace HLAS.Infrastructure
                         ReadinessGateStatus.Blocked,
                         "Unresolved governed maintenance evaluation is not yet implemented."),
 
-                    new ReadinessCheckItemRecord(
-                        readinessCheckId,
-                        5,
-                        ReadinessGateCode.ProjectJmfReview,
-                        ReadinessGateStatus.Blocked,
-                        "Project/JMF review state is not yet represented completely in the C# project database."),
-
+                  EvaluateProjectJmfReview(
+    fullProjectRoot,
+    readinessCheckId),
                     new ReadinessCheckItemRecord(
                         readinessCheckId,
                         6,
@@ -155,6 +148,256 @@ namespace HLAS.Infrastructure
 
                 throw;
             }
+        }
+        private static ReadinessCheckItemRecord EvaluateProjectJmfTruth(
+    string fullProjectRoot,
+    ReadinessCheckId readinessCheckId)
+        {
+            string databasePath =
+                Path.Combine(
+                    fullProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+            SqliteConnectionStringBuilder builder =
+                new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadOnly,
+                    Pooling = false
+                };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            string projectJmfRevisionId;
+
+            using (SqliteCommand revisionCommand =
+                connection.CreateCommand())
+            {
+                revisionCommand.CommandText =
+                    """
+            SELECT
+                revision.ProjectJmfRevisionId,
+                revision.ApprovedUtc,
+                operation.CompletedUtc,
+                operation.Outcome
+            FROM HLAS_Project_JMF_Revisions AS revision
+            LEFT JOIN HLAS_Governed_Operations AS operation
+                ON operation.OperationId = revision.OperationId
+            ORDER BY revision.RevisionNumber DESC
+            LIMIT 1;
+            """;
+
+                using SqliteDataReader revisionReader =
+                    revisionCommand.ExecuteReader();
+
+                if (!revisionReader.Read())
+                {
+                    return new ReadinessCheckItemRecord(
+                        readinessCheckId,
+                        3,
+                        ReadinessGateCode.ProjectJmfTruth,
+                        ReadinessGateStatus.Blocked,
+                        "No governed Project/JMF revision exists.");
+                }
+
+                projectJmfRevisionId =
+                    revisionReader.GetString(0);
+
+                if (revisionReader.IsDBNull(1) ||
+                    !DateTimeOffset.TryParse(
+                        revisionReader.GetString(1),
+                        out _))
+                {
+                    return new ReadinessCheckItemRecord(
+                        readinessCheckId,
+                        3,
+                        ReadinessGateCode.ProjectJmfTruth,
+                        ReadinessGateStatus.Blocked,
+                        "The current Project/JMF revision does not contain a valid governed approval timestamp.");
+                }
+
+                if (revisionReader.IsDBNull(2) ||
+                    revisionReader.IsDBNull(3) ||
+                    !string.Equals(
+                        revisionReader.GetString(3),
+                        "SUCCESS",
+                        StringComparison.Ordinal))
+                {
+                    return new ReadinessCheckItemRecord(
+                        readinessCheckId,
+                        3,
+                        ReadinessGateCode.ProjectJmfTruth,
+                        ReadinessGateStatus.Blocked,
+                        "The current Project/JMF revision is not backed by a completed successful governed operation.");
+                }
+            }
+
+            HashSet<string> requiredFieldIds =
+            [
+                "PJT-001",
+        "PJT-002",
+        "PJT-003",
+        "PJT-004",
+        "PJT-005",
+        "PJT-006",
+        "PJT-007",
+        "JMF-001",
+        "JMF-002",
+        "JMF-003",
+        "JMF-004",
+        "JMF-005",
+        "JMF-006",
+        "JMF-007",
+        "JMF-008",
+        "JMF-009",
+        "JMF-010",
+        "JMF-011",
+        "JMF-012",
+        "JMF-013"
+            ];
+
+            using SqliteCommand fieldCommand =
+                connection.CreateCommand();
+
+            fieldCommand.CommandText =
+                """
+        SELECT
+            FieldId,
+            FieldValue,
+            SourceEvidenceId
+        FROM HLAS_Project_JMF_Revision_Fields
+        WHERE ProjectJmfRevisionId = $projectJmfRevisionId;
+        """;
+
+            fieldCommand.Parameters.AddWithValue(
+                "$projectJmfRevisionId",
+                projectJmfRevisionId);
+
+            using SqliteDataReader fieldReader =
+                fieldCommand.ExecuteReader();
+
+            HashSet<string> foundFieldIds =
+                new(StringComparer.Ordinal);
+
+            while (fieldReader.Read())
+            {
+                string fieldId =
+                    fieldReader.GetString(0);
+
+                if (!requiredFieldIds.Contains(fieldId) ||
+                    !foundFieldIds.Add(fieldId))
+                {
+                    return new ReadinessCheckItemRecord(
+                        readinessCheckId,
+                        3,
+                        ReadinessGateCode.ProjectJmfTruth,
+                        ReadinessGateStatus.Blocked,
+                        "The current Project/JMF revision contains an unexpected or duplicate governed field.");
+                }
+
+                if (fieldReader.IsDBNull(1) ||
+                    fieldReader.IsDBNull(2) ||
+                    string.IsNullOrWhiteSpace(
+                        fieldReader.GetString(2)))
+                {
+                    return new ReadinessCheckItemRecord(
+                        readinessCheckId,
+                        3,
+                        ReadinessGateCode.ProjectJmfTruth,
+                        ReadinessGateStatus.Blocked,
+                        $"Project/JMF field lacks complete governed value/source lineage: {fieldId}.");
+                }
+            }
+
+            if (foundFieldIds.Count != requiredFieldIds.Count ||
+                !foundFieldIds.SetEquals(requiredFieldIds))
+            {
+                return new ReadinessCheckItemRecord(
+                    readinessCheckId,
+                    3,
+                    ReadinessGateCode.ProjectJmfTruth,
+                    ReadinessGateStatus.Blocked,
+                    "The current Project/JMF revision does not contain the complete governed 20-field set.");
+            }
+
+            return new ReadinessCheckItemRecord(
+                readinessCheckId,
+                3,
+                ReadinessGateCode.ProjectJmfTruth,
+                ReadinessGateStatus.Pass,
+                "The current Project/JMF revision contains the complete governed 20-field set with source, operation and approval-time lineage.");
+        }
+        private static ReadinessCheckItemRecord EvaluateProjectJmfReview(
+    string fullProjectRoot,
+    ReadinessCheckId readinessCheckId)
+        {
+            string databasePath =
+                Path.Combine(
+                    fullProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+            SqliteConnectionStringBuilder builder =
+                new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadOnly,
+                    Pooling = false
+                };
+
+            using SqliteConnection connection =
+                new(builder.ToString());
+
+            connection.Open();
+
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.CommandText =
+                """
+        SELECT COUNT(*)
+        FROM HLAS_Project_JMF_Review_Cases AS reviewCase
+        WHERE
+            reviewCase.ResolvedOperationId IS NULL
+            OR reviewCase.ResolvedUtc IS NULL
+            OR EXISTS
+            (
+                SELECT 1
+                FROM HLAS_Project_JMF_Review_Items AS reviewItem
+                WHERE
+                    reviewItem.ReviewCaseId = reviewCase.ReviewCaseId
+                    AND
+                    (
+                        reviewItem.Decision IS NULL
+                        OR reviewItem.DecisionReason IS NULL
+                        OR reviewItem.DecidedOperationId IS NULL
+                        OR reviewItem.DecidedUtc IS NULL
+                    )
+            );
+        """;
+
+            long unresolvedCount =
+                Convert.ToInt64(
+                    command.ExecuteScalar());
+
+            if (unresolvedCount > 0)
+            {
+                return new ReadinessCheckItemRecord(
+                    readinessCheckId,
+                    5,
+                    ReadinessGateCode.ProjectJmfReview,
+                    ReadinessGateStatus.Blocked,
+                    "One or more governed Project/JMF review cases or items remain unresolved.");
+            }
+
+            return new ReadinessCheckItemRecord(
+                readinessCheckId,
+                5,
+                ReadinessGateCode.ProjectJmfReview,
+                ReadinessGateStatus.Pass,
+                "No unresolved governed Project/JMF review cases or items remain.");
         }
         private static ReadinessCheckItemRecord EvaluateSourceEvidence(
     string fullProjectRoot,

@@ -11,7 +11,7 @@ namespace HLAS.Tests
     public sealed class ProjectDatabaseSchemaTests
     {
         [TestMethod]
-        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion11AndCurrentTables ()
+        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion12AndCurrentTables()
         {
             string databasePath = CreateTemporaryDatabasePath();
 
@@ -94,6 +94,25 @@ Assert.IsTrue(
                     TableExists(
                         connection,
                         "HLAS_Source_Evidence_Requirement_Items"));
+                Assert.IsTrue(
+    TableExists(
+        connection,
+        "HLAS_Project_JMF_Revisions"));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Revision_Fields"));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Review_Cases"));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Review_Items"));
             }
             finally
             {
@@ -2267,6 +2286,182 @@ Assert.IsTrue(
             }
         }
         [TestMethod]
+        public void MigrateVersion11ToVersion12_CommittedTransaction_AdvancesSchemaAndAddsProjectJmfTables()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion11Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion11ToVersion12(
+                        connection,
+                        transaction);
+
+                    transaction.Commit();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version12,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Revisions"));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Revision_Fields"));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Review_Cases"));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Review_Items"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion11ToVersion12_RolledBackTransaction_LeavesVersion11()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion11Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion11ToVersion12(
+                        connection,
+                        transaction);
+
+                    transaction.Rollback();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version11,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Revisions"));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Revision_Fields"));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Review_Cases"));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Review_Items"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion11ToVersion12_NonVersion11_SafeStops()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion10Database(
+                    connection,
+                    projectId);
+
+                using SqliteTransaction migrationTransaction =
+                    connection.BeginTransaction();
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectDatabaseSchema.MigrateVersion11ToVersion12(
+                            connection,
+                            migrationTransaction));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                migrationTransaction.Rollback();
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version10,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Revisions"));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Revision_Fields"));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Review_Cases"));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Project_JMF_Review_Items"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
         public void SourceEvidenceRequirementRevision_VersionGreaterThanOneWithoutPrior_IsRejected()
         {
             string databasePath = CreateTemporaryDatabasePath();
@@ -2566,6 +2761,23 @@ Assert.IsTrue(
                 connection.BeginTransaction();
 
             ProjectDatabaseSchema.MigrateVersion9ToVersion10(
+                connection,
+                transaction);
+
+            transaction.Commit();
+        }
+        private static void CreateVersion11Database(
+    SqliteConnection connection,
+    ProjectId projectId)
+        {
+            CreateVersion10Database(
+                connection,
+                projectId);
+
+            using SqliteTransaction transaction =
+                connection.BeginTransaction();
+
+            ProjectDatabaseSchema.MigrateVersion10ToVersion11(
                 connection,
                 transaction);
 

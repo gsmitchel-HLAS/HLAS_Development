@@ -17,7 +17,8 @@ namespace HLAS.Infrastructure
         public const int Version9 = 9;
         public const int Version10 = 10;
         public const int Version11 = 11;
-        public const int CurrentDatabaseSchemaVersion = Version11;
+        public const int Version12 = 12;
+        public const int CurrentDatabaseSchemaVersion = Version12;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -82,6 +83,21 @@ namespace HLAS.Infrastructure
     transaction);
 
             CreateSourceEvidenceRequirementItemsTable(
+                connection,
+                transaction);
+            CreateProjectJmfRevisionsTable(
+    connection,
+    transaction);
+
+            CreateProjectJmfRevisionFieldsTable(
+                connection,
+                transaction);
+
+            CreateProjectJmfReviewCasesTable(
+                connection,
+                transaction);
+
+            CreateProjectJmfReviewItemsTable(
                 connection,
                 transaction);
             UpgradeSourceEvidenceMetadataVersionsToVersion9(
@@ -419,6 +435,46 @@ namespace HLAS.Infrastructure
                 Version10,
                 Version11);
         }
+        public static void MigrateVersion11ToVersion12(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version11)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 11 to Version 12 migration requires database schema version 11.");
+            }
+
+            CreateProjectJmfRevisionsTable(
+                connection,
+                transaction);
+
+            CreateProjectJmfRevisionFieldsTable(
+                connection,
+                transaction);
+
+            CreateProjectJmfReviewCasesTable(
+                connection,
+                transaction);
+
+            CreateProjectJmfReviewItemsTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version11,
+                Version12);
+        }
         private static void CreateSourceEvidenceRequirementRevisionsTable(
     SqliteConnection connection,
     SqliteTransaction transaction)
@@ -535,6 +591,218 @@ namespace HLAS.Infrastructure
 
             FOREIGN KEY (EvidenceId)
                 REFERENCES HLAS_Source_Evidence_Catalog(EvidenceId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateProjectJmfRevisionsTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Project_JMF_Revisions
+        (
+            ProjectJmfRevisionId TEXT NOT NULL
+                PRIMARY KEY,
+            RevisionNumber INTEGER NOT NULL
+                CHECK (RevisionNumber > 0),
+            PriorProjectJmfRevisionId TEXT NULL,
+            SourceEvidenceId TEXT NOT NULL,
+            OperationId TEXT NOT NULL
+                UNIQUE,
+            ApprovedUtc TEXT NOT NULL,
+
+            CHECK
+            (
+                (
+                    RevisionNumber = 1
+                    AND PriorProjectJmfRevisionId IS NULL
+                )
+                OR
+                (
+                    RevisionNumber > 1
+                    AND PriorProjectJmfRevisionId IS NOT NULL
+                )
+            ),
+
+            CHECK
+            (
+                PriorProjectJmfRevisionId IS NULL
+                OR PriorProjectJmfRevisionId <> ProjectJmfRevisionId
+            ),
+
+            UNIQUE (RevisionNumber),
+            UNIQUE (PriorProjectJmfRevisionId),
+
+            FOREIGN KEY (PriorProjectJmfRevisionId)
+                REFERENCES HLAS_Project_JMF_Revisions(
+                    ProjectJmfRevisionId),
+
+            FOREIGN KEY (SourceEvidenceId)
+                REFERENCES HLAS_Source_Evidence_Catalog(EvidenceId),
+
+            FOREIGN KEY (OperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateProjectJmfRevisionFieldsTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Project_JMF_Revision_Fields
+        (
+            ProjectJmfRevisionId TEXT NOT NULL,
+            FieldId TEXT NOT NULL
+                CHECK (length(trim(FieldId)) > 0),
+            FieldValue TEXT NOT NULL,
+            SourceEvidenceId TEXT NOT NULL,
+
+            PRIMARY KEY
+            (
+                ProjectJmfRevisionId,
+                FieldId
+            ),
+
+            FOREIGN KEY (ProjectJmfRevisionId)
+                REFERENCES HLAS_Project_JMF_Revisions(
+                    ProjectJmfRevisionId),
+
+            FOREIGN KEY (SourceEvidenceId)
+                REFERENCES HLAS_Source_Evidence_Catalog(EvidenceId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateProjectJmfReviewCasesTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Project_JMF_Review_Cases
+        (
+            ReviewCaseId TEXT NOT NULL
+                PRIMARY KEY,
+            SourceEvidenceId TEXT NOT NULL,
+            BaselineProjectJmfRevisionId TEXT NOT NULL,
+            OpenedOperationId TEXT NOT NULL
+                UNIQUE,
+            OpenedUtc TEXT NOT NULL,
+            ResolvedOperationId TEXT NULL
+                UNIQUE,
+            ResolvedUtc TEXT NULL,
+
+            CHECK
+            (
+                (
+                    ResolvedOperationId IS NULL
+                    AND ResolvedUtc IS NULL
+                )
+                OR
+                (
+                    ResolvedOperationId IS NOT NULL
+                    AND ResolvedUtc IS NOT NULL
+                )
+            ),
+
+            FOREIGN KEY (SourceEvidenceId)
+                REFERENCES HLAS_Source_Evidence_Catalog(EvidenceId),
+
+            FOREIGN KEY (BaselineProjectJmfRevisionId)
+                REFERENCES HLAS_Project_JMF_Revisions(
+                    ProjectJmfRevisionId),
+
+            FOREIGN KEY (OpenedOperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId),
+
+            FOREIGN KEY (ResolvedOperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateProjectJmfReviewItemsTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Project_JMF_Review_Items
+        (
+            ReviewCaseId TEXT NOT NULL,
+            FieldId TEXT NOT NULL
+                CHECK (length(trim(FieldId)) > 0),
+            CurrentApprovedValue TEXT NOT NULL,
+            NewOfficialSourceValue TEXT NOT NULL,
+            Decision TEXT NULL
+                CHECK
+                (
+                    Decision IS NULL
+                    OR Decision IN
+                    (
+                        'KEEP CURRENT',
+                        'ACCEPT NEW'
+                    )
+                ),
+            DecisionReason TEXT NULL,
+            DecidedOperationId TEXT NULL,
+            DecidedUtc TEXT NULL,
+
+            CHECK
+            (
+                (
+                    Decision IS NULL
+                    AND DecisionReason IS NULL
+                    AND DecidedOperationId IS NULL
+                    AND DecidedUtc IS NULL
+                )
+                OR
+                (
+                    Decision IS NOT NULL
+                    AND DecisionReason IS NOT NULL
+                    AND length(trim(DecisionReason)) > 0
+                    AND DecidedOperationId IS NOT NULL
+                    AND DecidedUtc IS NOT NULL
+                )
+            ),
+
+            PRIMARY KEY
+            (
+                ReviewCaseId,
+                FieldId
+            ),
+
+            FOREIGN KEY (ReviewCaseId)
+                REFERENCES HLAS_Project_JMF_Review_Cases(
+                    ReviewCaseId),
+
+            FOREIGN KEY (DecidedOperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId)
         );
         """;
 
