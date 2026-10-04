@@ -62,12 +62,9 @@ namespace HLAS.Infrastructure
                   EvaluateProjectJmfReview(
     fullProjectRoot,
     readinessCheckId),
-                    new ReadinessCheckItemRecord(
-                        readinessCheckId,
-                        6,
-                        ReadinessGateCode.Lineage,
-                        ReadinessGateStatus.Blocked,
-                        "Current-lineage consistency evaluation is not yet implemented."),
+                   LineageReadinessEvaluator.Evaluate(
+    fullProjectRoot,
+    readinessCheckId),
 
                   EvaluateFreezeCapability(
     fullProjectRoot,
