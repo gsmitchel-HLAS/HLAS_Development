@@ -94,8 +94,21 @@
                             Margin="12,0,0,0"
                             Click="LoginButton_Click"
                             IsEnabled="False"/>
-
-                    <TextBlock x:Name="AuthenticationStatusText"
+                    <Button x:Name="LogoutButton"
+        Content="Logout"
+        Width="110"
+        Height="34"
+        Margin="12,0,0,0"
+        Click="LogoutButton_Click"
+        IsEnabled="False"/>
+                    <Button x:Name="ChangeUserButton"
+        Content="Change User"
+        Width="120"
+        Height="34"
+        Margin="12,0,0,0"
+        Click="ChangeUserButton_Click"
+        IsEnabled="False"/>
+                     <TextBlock x:Name="AuthenticationStatusText"
                                Text="Authentication controls not yet connected."
                                Margin="20,8,0,0"/>
                 </StackPanel>

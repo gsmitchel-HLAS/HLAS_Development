@@ -54,6 +54,73 @@ namespace HLAS.Tests
             }
         }
 
+         [TestMethod]
+        public void Authorize_DifferentAuthenticatedUsers_ResolveTheirOwnStoredProjectRoles()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId firstUserId = UserId.CreateNew();
+                UserId secondUserId = UserId.CreateNew();
+
+                ProjectAuthorizationStore.AddAuthorization(
+                    projectRoot,
+                    firstUserId,
+                    ProjectRole.Admin);
+
+                ProjectAuthorizationStore.AddAuthorization(
+                    projectRoot,
+                    secondUserId,
+                    ProjectRole.Technician);
+
+                AuthenticatedIdentity firstIdentity =
+                    new AuthenticationService(
+                        new FakeAuthenticationGateway(
+                            AuthenticationGatewayResult.Succeeded(firstUserId)))
+                    .Authenticate(
+                        "first-development-user",
+                        "first-development-secret");
+
+                AuthenticatedIdentity secondIdentity =
+                    new AuthenticationService(
+                        new FakeAuthenticationGateway(
+                            AuthenticationGatewayResult.Succeeded(secondUserId)))
+                    .Authenticate(
+                        "second-development-user",
+                        "second-development-secret");
+
+                ProjectAuthorizationService service =
+                    new(new StoreGateway());
+
+                AuthorizedProjectIdentity firstResult =
+                    service.Authorize(
+                        projectRoot,
+                        firstIdentity);
+
+                AuthorizedProjectIdentity secondResult =
+                    service.Authorize(
+                        projectRoot,
+                        secondIdentity);
+
+                Assert.AreEqual(
+                    ProjectRole.Admin,
+                    firstResult.ProjectRole);
+                Assert.AreEqual(
+                    ProjectRole.Technician,
+                    secondResult.ProjectRole);
+
+                Assert.AreEqual(
+                    secondUserId,
+                    secondResult.UserId);
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
         [TestMethod]
         public void Authorize_UserAbsentFromProject_SafeStops()
         {

@@ -67,6 +67,33 @@ namespace HLAS.Desktop
                     ex.Message;
             }
         }
+        private void LogoutButton_Click(
+    object sender,
+    RoutedEventArgs e)
+        {
+            ClearOperationalAuthority();
+
+            CommandResultText.Text =
+                "HLAS user logged out.";
+
+            RefreshAuthenticationState();
+            RefreshContext();
+        }
+        private void ChangeUserButton_Click(
+    object sender,
+    RoutedEventArgs e)
+        {
+            ClearOperationalAuthority();
+
+            LoginNameTextBox.Clear();
+            SecretPasswordBox.Clear();
+
+            CommandResultText.Text =
+                "Previous HLAS user cleared. Login required.";
+
+            RefreshAuthenticationState();
+            RefreshContext();
+        }
         private void NewProjectButton_Click(
     object sender,
     RoutedEventArgs e)
@@ -144,6 +171,11 @@ namespace HLAS.Desktop
                     ex.Message;
             }
         }
+        private void ClearOperationalAuthority()
+        {
+            _projectSession = null;
+            _userSession = null;
+        }
         private void RefreshAuthenticationState()
         {
             bool bootstrapRequired =
@@ -163,6 +195,10 @@ namespace HLAS.Desktop
             OpenProjectButton.IsEnabled =
                 _userSession is not null;
 
+            LogoutButton.IsEnabled =
+    _userSession is not null;
+            ChangeUserButton.IsEnabled =
+    _userSession is not null;
             AuthenticationStatusText.Text =
                 bootstrapRequired
                     ? "Initial HLAS user must be created."
