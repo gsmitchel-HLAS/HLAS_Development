@@ -19,7 +19,8 @@ namespace HLAS.Infrastructure
         public const int Version11 = 11;
         public const int Version12 = 12;
         public const int Version13 = 13;
-        public const int CurrentDatabaseSchemaVersion = Version13;
+        public const int Version14 = 14;
+        public const int CurrentDatabaseSchemaVersion = Version14;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -101,6 +102,9 @@ namespace HLAS.Infrastructure
             CreateProjectJmfReviewItemsTable(
                 connection,
                 transaction);
+            CreateReleaseRecordsTable(
+    connection,
+    transaction);
             AddGovernedOperationKindForVersion13(
     connection,
     transaction);
@@ -515,6 +519,34 @@ namespace HLAS.Infrastructure
                 Version12,
                 Version13);
         }
+        public static void MigrateVersion13ToVersion14(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version13)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 13 to Version 14 migration requires database schema version 13.");
+            }
+
+            CreateReleaseRecordsTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version13,
+                Version14);
+        }
         private static void AddGovernedOperationKindForVersion13(
     SqliteConnection connection,
     SqliteTransaction transaction)
@@ -532,6 +564,36 @@ namespace HLAS.Infrastructure
                 OperationKind IS NULL
                 OR length(trim(OperationKind)) > 0
             );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateReleaseRecordsTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Release_Records
+        (
+            ReleaseId TEXT NOT NULL
+                PRIMARY KEY,
+            ReadinessCheckId TEXT NOT NULL
+        UNIQUE,
+            OperationId TEXT NOT NULL
+                UNIQUE,
+            ReleaseRequestedUtc TEXT NOT NULL,
+
+            FOREIGN KEY (ReadinessCheckId)
+                REFERENCES HLAS_Readiness_Checks(ReadinessCheckId),
+
+            FOREIGN KEY (OperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId)
+        );
         """;
 
             command.ExecuteNonQuery();
