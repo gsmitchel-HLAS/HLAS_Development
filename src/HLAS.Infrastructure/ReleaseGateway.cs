@@ -38,8 +38,9 @@ namespace HLAS.Infrastructure
             try
             {
                 VerifyReadyBasis(
-                    fullProjectRoot,
-                    readinessCheckId);
+     fullProjectRoot,
+     manifest.ProjectId,
+     readinessCheckId);
 
                 ReleaseRecord releaseRecord =
                     new(
@@ -103,8 +104,9 @@ namespace HLAS.Infrastructure
         }
 
         private static void VerifyReadyBasis(
-            string fullProjectRoot,
-            ReadinessCheckId readinessCheckId)
+    string fullProjectRoot,
+    ProjectId projectId,
+    ReadinessCheckId readinessCheckId)
         {
             using SqliteConnection connection =
                 OpenDatabase(fullProjectRoot);
@@ -115,23 +117,40 @@ namespace HLAS.Infrastructure
                 connection.CreateCommand();
 
             command.CommandText =
-                """
-                SELECT COUNT(*)
-                FROM HLAS_Readiness_Checks AS readiness
-                INNER JOIN HLAS_Governed_Operations AS operation
-                    ON operation.OperationId = readiness.OperationId
-                WHERE
-                    readiness.ReadinessCheckId = $readinessCheckId
-                    AND readiness.OverallStatus = 'READY'
-                    AND operation.SeriesId = 'V'
-                    AND operation.CompletedUtc IS NOT NULL
-                    AND operation.Outcome = 'SUCCESS';
-                """;
+     """
+    SELECT COUNT(*)
+    FROM HLAS_Readiness_Checks AS readiness
+    INNER JOIN HLAS_Governed_Operations AS operation
+        ON operation.OperationId = readiness.OperationId
+    WHERE
+        readiness.ReadinessCheckId = $readinessCheckId
+        AND readiness.OverallStatus = 'READY'
+        AND operation.ProjectId = $projectId
+        AND operation.SeriesId = 'V'
+        AND operation.CompletedUtc IS NOT NULL
+        AND operation.Outcome = 'SUCCESS'
+        AND
+        (
+            SELECT COUNT(*)
+            FROM HLAS_Readiness_Check_Items AS item
+            WHERE item.ReadinessCheckId = readiness.ReadinessCheckId
+        ) = 7
+        AND NOT EXISTS
+        (
+            SELECT 1
+            FROM HLAS_Readiness_Check_Items AS item
+            WHERE
+                item.ReadinessCheckId = readiness.ReadinessCheckId
+                AND item.GateStatus <> 'PASS'
+        );
+    """;
 
             command.Parameters.AddWithValue(
                 "$readinessCheckId",
                 readinessCheckId.Value.ToString("D"));
-
+            command.Parameters.AddWithValue(
+    "$projectId",
+    projectId.Value.ToString("D"));
             long count =
                 Convert.ToInt64(
                     command.ExecuteScalar());
@@ -154,7 +173,9 @@ namespace HLAS.Infrastructure
             existingReleaseCommand.Parameters.AddWithValue(
                 "$readinessCheckId",
                 readinessCheckId.Value.ToString("D"));
-
+            command.Parameters.AddWithValue(
+    "$projectId",
+    projectId.Value.ToString("D"));
             long existingReleaseCount =
                 Convert.ToInt64(
                     existingReleaseCommand.ExecuteScalar());

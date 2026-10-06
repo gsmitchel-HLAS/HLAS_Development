@@ -465,7 +465,45 @@ namespace HLAS.Tests
                 DateTimeOffset.UtcNow.ToString("O"));
 
             command.ExecuteNonQuery();
+            string firstGateStatus =
+    overallStatus == "READY"
+        ? "PASS"
+        : "BLOCKED";
 
+            using SqliteCommand itemCommand =
+                connection.CreateCommand();
+
+            itemCommand.Transaction = transaction;
+
+            itemCommand.CommandText =
+                """
+    INSERT INTO HLAS_Readiness_Check_Items
+    (
+        ReadinessCheckId,
+        GateSequence,
+        GateCode,
+        GateStatus,
+        Detail
+    )
+    VALUES
+        ($readinessCheckId, 1, 'PROJECT_IDENTITY', $firstGateStatus, NULL),
+        ($readinessCheckId, 2, 'SOURCE_EVIDENCE', 'PASS', NULL),
+        ($readinessCheckId, 3, 'PROJECT_JMF_TRUTH', 'PASS', NULL),
+        ($readinessCheckId, 4, 'MAINTENANCE', 'PASS', NULL),
+        ($readinessCheckId, 5, 'PROJECT_JMF_REVIEW', 'PASS', NULL),
+        ($readinessCheckId, 6, 'LINEAGE', 'PASS', NULL),
+        ($readinessCheckId, 7, 'FREEZE_CAPABILITY', 'PASS', NULL);
+    """;
+
+            itemCommand.Parameters.AddWithValue(
+                "$readinessCheckId",
+                readinessCheckId.Value.ToString("D"));
+
+            itemCommand.Parameters.AddWithValue(
+                "$firstGateStatus",
+                firstGateStatus);
+
+            itemCommand.ExecuteNonQuery();
             GovernedOperationService.FinalizeSuccessInTransaction(
                 connection,
                 transaction,
