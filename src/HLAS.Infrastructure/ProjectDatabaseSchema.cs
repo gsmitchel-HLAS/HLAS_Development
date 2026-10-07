@@ -20,7 +20,8 @@ namespace HLAS.Infrastructure
         public const int Version12 = 12;
         public const int Version13 = 13;
         public const int Version14 = 14;
-        public const int CurrentDatabaseSchemaVersion = Version14;
+        public const int Version15 = 15;
+        public const int CurrentDatabaseSchemaVersion = Version15;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -108,7 +109,9 @@ namespace HLAS.Infrastructure
             AddGovernedOperationKindForVersion13(
     connection,
     transaction);
-
+            CreateHistoricalCheckpointsTable(
+    connection,
+    transaction);
             CreateSourceEvidenceMaintenanceResolutionsTable(
                 connection,
                 transaction);
@@ -547,6 +550,34 @@ namespace HLAS.Infrastructure
                 Version13,
                 Version14);
         }
+        public static void MigrateVersion14ToVersion15(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version14)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 14 to Version 15 migration requires database schema version 14.");
+            }
+
+            CreateHistoricalCheckpointsTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version14,
+                Version15);
+        }
         private static void AddGovernedOperationKindForVersion13(
     SqliteConnection connection,
     SqliteTransaction transaction)
@@ -593,6 +624,52 @@ namespace HLAS.Infrastructure
 
             FOREIGN KEY (OperationId)
                 REFERENCES HLAS_Governed_Operations(OperationId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+        private static void CreateHistoricalCheckpointsTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Historical_Checkpoints
+        (
+            FreezeId TEXT NOT NULL
+                PRIMARY KEY,
+            OperationId TEXT NOT NULL
+                UNIQUE,
+            CheckpointType TEXT NOT NULL
+             CHECK (length(trim(CheckpointType)) > 0),
+            ReleaseId TEXT NULL
+                UNIQUE,
+            RelativeCheckpointPath TEXT NOT NULL
+                UNIQUE
+                CHECK (length(trim(RelativeCheckpointPath)) > 0),
+            ManifestRelativePath TEXT NOT NULL
+                UNIQUE
+                CHECK (length(trim(ManifestRelativePath)) > 0),
+            ManifestSha256Hex TEXT NOT NULL
+                CHECK (length(ManifestSha256Hex) = 64),
+            FrozenUtc TEXT NOT NULL,
+
+            CHECK
+            (
+                CheckpointType <> 'RELEASE_FREEZE'
+                OR ReleaseId IS NOT NULL
+            ),
+
+            FOREIGN KEY (OperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId),
+
+            FOREIGN KEY (ReleaseId)
+                REFERENCES HLAS_Release_Records(ReleaseId)
         );
         """;
 

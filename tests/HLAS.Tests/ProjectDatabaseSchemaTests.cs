@@ -11,7 +11,7 @@ namespace HLAS.Tests
     public sealed class ProjectDatabaseSchemaTests
     {
         [TestMethod]
-        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion14AndCurrentTables()
+        public void InitializeNewDatabase_CommittedTransaction_PersistsVersion15AndCurrentTables()
         {
             string databasePath = CreateTemporaryDatabasePath();
 
@@ -133,6 +133,10 @@ Assert.IsTrue(
     TableExists(
         connection,
         "HLAS_Release_Records"));
+                Assert.IsTrue(
+    TableExists(
+        connection,
+        "HLAS_Historical_Checkpoints"));
             }
             finally
             {
@@ -2773,6 +2777,142 @@ Assert.IsTrue(
             }
         }
         [TestMethod]
+        public void MigrateVersion14ToVersion15_CommittedTransaction_AdvancesSchemaAndAddsHistoricalCheckpoints()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion14Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion14ToVersion15(
+                        connection,
+                        transaction);
+
+                    transaction.Commit();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version15,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Historical_Checkpoints"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion14ToVersion15_RolledBackTransaction_LeavesVersion14()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                ProjectId projectId = ProjectId.CreateNew();
+
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                CreateVersion14Database(
+                    connection,
+                    projectId);
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.MigrateVersion14ToVersion15(
+                        connection,
+                        transaction);
+
+                    transaction.Rollback();
+                }
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.Version14,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsFalse(
+                    TableExists(
+                        connection,
+                        "HLAS_Historical_Checkpoints"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
+        public void MigrateVersion14ToVersion15_NonVersion14_SafeStops()
+        {
+            string databasePath = CreateTemporaryDatabasePath();
+
+            try
+            {
+                using SqliteConnection connection =
+                    OpenReadWriteCreateConnection(databasePath);
+
+                connection.Open();
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    ProjectDatabaseSchema.InitializeNewDatabase(
+                        connection,
+                        transaction,
+                        ProjectId.CreateNew());
+
+                    transaction.Commit();
+                }
+
+                using SqliteTransaction migrationTransaction =
+                    connection.BeginTransaction();
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectDatabaseSchema.MigrateVersion14ToVersion15(
+                            connection,
+                            migrationTransaction));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                migrationTransaction.Rollback();
+
+                Assert.AreEqual(
+                    ProjectDatabaseSchema.CurrentDatabaseSchemaVersion,
+                    ReadDatabaseSchemaVersion(connection));
+
+                Assert.IsTrue(
+                    TableExists(
+                        connection,
+                        "HLAS_Historical_Checkpoints"));
+            }
+            finally
+            {
+                DeleteTemporaryDatabase(databasePath);
+            }
+        }
+        [TestMethod]
         public void SourceEvidenceRequirementRevision_VersionGreaterThanOneWithoutPrior_IsRejected()
         {
             string databasePath = CreateTemporaryDatabasePath();
@@ -3123,6 +3263,23 @@ Assert.IsTrue(
                 connection.BeginTransaction();
 
             ProjectDatabaseSchema.MigrateVersion12ToVersion13(
+                connection,
+                transaction);
+
+            transaction.Commit();
+        }
+        private static void CreateVersion14Database(
+    SqliteConnection connection,
+    ProjectId projectId)
+        {
+            CreateVersion13Database(
+                connection,
+                projectId);
+
+            using SqliteTransaction transaction =
+                connection.BeginTransaction();
+
+            ProjectDatabaseSchema.MigrateVersion13ToVersion14(
                 connection,
                 transaction);
 
