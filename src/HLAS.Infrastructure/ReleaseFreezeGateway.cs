@@ -678,8 +678,9 @@ namespace HLAS.Infrastructure
         }
         private static ReadinessCheckId VerifyReleaseBasis(
     string fullProjectRoot,
-    ProjectId projectId,
     
+    ProjectId projectId,
+
     ReleaseId releaseId)
         {
             string databasePath =
@@ -807,9 +808,8 @@ namespace HLAS.Infrastructure
 
             interveningCommand.Parameters.AddWithValue(
                 "$releaseOperationId",
-                releaseOperationId);
 
-           
+                releaseOperationId);
 
             long interveningCount =
                 Convert.ToInt64(
