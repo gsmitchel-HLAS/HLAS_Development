@@ -214,12 +214,12 @@ namespace HLAS.Tests
                         release.ReleaseId);
 
                 InvalidOperationException exception =
-                  Assert.ThrowsExactly<InvalidOperationException>(
-                      () => ReleaseFreezeGateway.CreateReleaseFreeze(
-                          projectRoot,
-                          userId,
-                          ProjectRole.Admin,
-                          release.ReleaseId));
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ReleaseFreezeGateway.CreateReleaseFreeze(
+                            projectRoot,
+                            userId,
+                            ProjectRole.Admin,
+                            release.ReleaseId));
 
                 StringAssert.Contains(
                     exception.Message,
