@@ -213,13 +213,14 @@ namespace HLAS.Tests
                         ProjectRole.Admin,
                         release.ReleaseId);
 
-                   InvalidOperationException exception =
-                    Assert.ThrowsExactly<InvalidOperationException>(
-                        () => ReleaseFreezeGateway.CreateReleaseFreeze(
-                            projectRoot,
-                            userId,
-                            ProjectRole.Admin,
-                            release.ReleaseId));
+                InvalidOperationException exception =
+                  Assert.ThrowsExactly<InvalidOperationException>(
+                      () => ReleaseFreezeGateway.CreateReleaseFreeze(
+                          projectRoot,
+                          userId,
+                          ProjectRole.Admin,
+                          release.ReleaseId));
+
                 StringAssert.Contains(
                     exception.Message,
                     "SAFE-STOP");
@@ -625,15 +626,10 @@ namespace HLAS.Tests
                         ProjectRole.Admin,
                         firstRelease.ReleaseId);
 
-                ReadinessCheckResult laterReadiness =
-                    ReadinessGateway.Evaluate(
-                        projectRoot,
-                        userId,
-                        ProjectRole.Admin);
                 string firstManifestPath =
-    Path.Combine(
-        projectRoot,
-        firstCheckpoint.ManifestRelativePath);
+      Path.Combine(
+          projectRoot,
+          firstCheckpoint.ManifestRelativePath);
 
                 byte[] firstManifestBytesBeforeLaterWork =
                     File.ReadAllBytes(
@@ -641,6 +637,13 @@ namespace HLAS.Tests
 
                 string firstManifestSha256BeforeLaterWork =
                     firstCheckpoint.ManifestSha256Hex;
+
+                ReadinessCheckResult laterReadiness =
+                    ReadinessGateway.Evaluate(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin);
+
                 Assert.AreNotEqual(
                     firstReadinessCheckId,
                     laterReadiness.Check.ReadinessCheckId);
