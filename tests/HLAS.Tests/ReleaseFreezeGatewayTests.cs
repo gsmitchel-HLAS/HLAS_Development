@@ -591,6 +591,406 @@ namespace HLAS.Tests
                     projectRoot);
             }
         }
+        [TestMethod]
+        public void CreateReleaseFreeze_LaterGovernedReadiness_PreservesPriorReleasedCheckpoint()
+        {
+            string projectRoot =
+                CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest manifest =
+                    ProjectPackageCreator.CreateNew(
+                        projectRoot);
+
+                UserId userId =
+                    UserId.CreateNew();
+
+                ReadinessCheckId firstReadinessCheckId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        manifest.ProjectId,
+                        userId);
+
+                ReleaseRecord firstRelease =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        firstReadinessCheckId);
+
+                HistoricalCheckpointRecord firstCheckpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        firstRelease.ReleaseId);
+
+                ReadinessCheckResult laterReadiness =
+                    ReadinessGateway.Evaluate(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin);
+
+                Assert.AreNotEqual(
+                    firstReadinessCheckId,
+                    laterReadiness.Check.ReadinessCheckId);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteCommand checkpointCommand =
+                    connection.CreateCommand();
+
+                checkpointCommand.CommandText =
+                    """
+                    SELECT COUNT(*)
+                    FROM HLAS_Historical_Checkpoints AS checkpoint
+                    INNER JOIN HLAS_Governed_Operations AS operation
+                        ON operation.OperationId = checkpoint.OperationId
+                    WHERE
+                        checkpoint.FreezeId = $freezeId
+                        AND checkpoint.ReleaseId = $releaseId
+                        AND checkpoint.CheckpointType = 'RELEASE_FREEZE'
+                        AND operation.CompletedUtc IS NOT NULL
+                        AND operation.Outcome = 'SUCCESS';
+                    """;
+
+                checkpointCommand.Parameters.AddWithValue(
+                    "$freezeId",
+                    firstCheckpoint.FreezeId.Value.ToString("D"));
+
+                checkpointCommand.Parameters.AddWithValue(
+                    "$releaseId",
+                    firstRelease.ReleaseId.Value.ToString("D"));
+
+                Assert.AreEqual(
+                    1L,
+                    Convert.ToInt64(
+                        checkpointCommand.ExecuteScalar()));
+
+                using SqliteCommand releaseCommand =
+                    connection.CreateCommand();
+
+                releaseCommand.CommandText =
+                    """
+                    SELECT COUNT(*)
+                    FROM HLAS_Release_Records
+                    WHERE
+                        ReleaseId = $releaseId
+                        AND ReadinessCheckId = $readinessCheckId;
+                    """;
+
+                releaseCommand.Parameters.AddWithValue(
+                    "$releaseId",
+                    firstRelease.ReleaseId.Value.ToString("D"));
+
+                releaseCommand.Parameters.AddWithValue(
+                    "$readinessCheckId",
+                    firstReadinessCheckId.Value.ToString("D"));
+
+                Assert.AreEqual(
+                    1L,
+                    Convert.ToInt64(
+                        releaseCommand.ExecuteScalar()));
+
+                Assert.IsTrue(
+                    Directory.Exists(
+                        Path.Combine(
+                            projectRoot,
+                            firstCheckpoint.RelativeCheckpointPath)));
+
+                Assert.IsTrue(
+                    File.Exists(
+                        Path.Combine(
+                            projectRoot,
+                            firstCheckpoint.ManifestRelativePath)));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(
+                    projectRoot);
+            }
+        }
+        [TestMethod]
+        public void CreateReleaseFreeze_FreshRereleaseAfterPriorFreeze_CreatesDistinctCheckpoint()
+        {
+            string projectRoot =
+                CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest manifest =
+                    ProjectPackageCreator.CreateNew(
+                        projectRoot);
+
+                UserId userId =
+                    UserId.CreateNew();
+
+                ReadinessCheckId firstReadinessCheckId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        manifest.ProjectId,
+                        userId);
+
+                ReleaseRecord firstRelease =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        firstReadinessCheckId);
+
+                HistoricalCheckpointRecord firstCheckpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        firstRelease.ReleaseId);
+
+                ReadinessCheckId secondReadinessCheckId =
+     CreateReadinessCheck(
+         projectRoot,
+         manifest.ProjectId,
+         userId);
+
+                ReleaseRecord secondRelease =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        secondReadinessCheckId);
+
+                HistoricalCheckpointRecord secondCheckpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        secondRelease.ReleaseId);
+
+                Assert.AreNotEqual(
+     firstReadinessCheckId,
+     secondReadinessCheckId);
+
+                Assert.AreNotEqual(
+                    firstRelease.ReleaseId,
+                    secondRelease.ReleaseId);
+
+                Assert.AreNotEqual(
+                    firstCheckpoint.FreezeId,
+                    secondCheckpoint.FreezeId);
+
+                Assert.AreNotEqual(
+                    firstCheckpoint.RelativeCheckpointPath,
+                    secondCheckpoint.RelativeCheckpointPath);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteCommand releaseCommand =
+                    connection.CreateCommand();
+
+                releaseCommand.CommandText =
+                    """
+                    SELECT COUNT(*)
+                    FROM HLAS_Release_Records;
+                    """;
+
+                Assert.AreEqual(
+                    2L,
+                    Convert.ToInt64(
+                        releaseCommand.ExecuteScalar()));
+
+                using SqliteCommand checkpointCommand =
+                    connection.CreateCommand();
+
+                checkpointCommand.CommandText =
+                    """
+                    SELECT COUNT(*)
+                    FROM HLAS_Historical_Checkpoints AS checkpoint
+                    INNER JOIN HLAS_Governed_Operations AS operation
+                        ON operation.OperationId = checkpoint.OperationId
+                    WHERE
+                        checkpoint.CheckpointType = 'RELEASE_FREEZE'
+                        AND operation.CompletedUtc IS NOT NULL
+                        AND operation.Outcome = 'SUCCESS';
+                    """;
+
+                Assert.AreEqual(
+                    2L,
+                    Convert.ToInt64(
+                        checkpointCommand.ExecuteScalar()));
+
+                Assert.IsTrue(
+                    Directory.Exists(
+                        Path.Combine(
+                            projectRoot,
+                            firstCheckpoint.RelativeCheckpointPath)));
+                string firstFrozenDatabasePath =
+                   Path.Combine(
+                       projectRoot,
+                       firstCheckpoint.RelativeCheckpointPath,
+                       ProjectPackageCreator.DatabaseFileName);
+
+                string secondFrozenDatabasePath =
+                    Path.Combine(
+                        projectRoot,
+                        secondCheckpoint.RelativeCheckpointPath,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder firstFrozenBuilder =
+                    new()
+                    {
+                        DataSource = firstFrozenDatabasePath,
+                        Mode = SqliteOpenMode.ReadOnly,
+                        Pooling = false
+                    };
+
+                using SqliteConnection firstFrozenConnection =
+                    new(firstFrozenBuilder.ToString());
+
+                firstFrozenConnection.Open();
+
+                using SqliteCommand firstFrozenReleaseCommand =
+                    firstFrozenConnection.CreateCommand();
+
+                firstFrozenReleaseCommand.CommandText =
+                    """
+                    SELECT COUNT(*)
+                    FROM HLAS_Release_Records
+                    WHERE ReleaseId = $releaseId;
+                    """;
+
+                firstFrozenReleaseCommand.Parameters.AddWithValue(
+                    "$releaseId",
+                    firstRelease.ReleaseId.Value.ToString("D"));
+
+                Assert.AreEqual(
+                    1L,
+                    Convert.ToInt64(
+                        firstFrozenReleaseCommand.ExecuteScalar()));
+
+                using SqliteCommand firstFrozenLaterReleaseCommand =
+                    firstFrozenConnection.CreateCommand();
+
+                firstFrozenLaterReleaseCommand.CommandText =
+                    """
+                    SELECT COUNT(*)
+                    FROM HLAS_Release_Records
+                    WHERE ReleaseId = $releaseId;
+                    """;
+
+                firstFrozenLaterReleaseCommand.Parameters.AddWithValue(
+                    "$releaseId",
+                    secondRelease.ReleaseId.Value.ToString("D"));
+
+                Assert.AreEqual(
+                    0L,
+                    Convert.ToInt64(
+                        firstFrozenLaterReleaseCommand.ExecuteScalar()));
+
+                using SqliteCommand firstFrozenCheckpointCommand =
+                    firstFrozenConnection.CreateCommand();
+
+                firstFrozenCheckpointCommand.CommandText =
+                    """
+                    SELECT COUNT(*)
+                    FROM HLAS_Historical_Checkpoints;
+                    """;
+
+                Assert.AreEqual(
+                    0L,
+                    Convert.ToInt64(
+                        firstFrozenCheckpointCommand.ExecuteScalar()));
+
+                SqliteConnectionStringBuilder secondFrozenBuilder =
+                    new()
+                    {
+                        DataSource = secondFrozenDatabasePath,
+                        Mode = SqliteOpenMode.ReadOnly,
+                        Pooling = false
+                    };
+
+                using SqliteConnection secondFrozenConnection =
+                    new(secondFrozenBuilder.ToString());
+
+                secondFrozenConnection.Open();
+
+                using SqliteCommand secondFrozenReleaseCommand =
+                    secondFrozenConnection.CreateCommand();
+
+                secondFrozenReleaseCommand.CommandText =
+                    """
+                    SELECT COUNT(*)
+                    FROM HLAS_Release_Records
+                    WHERE ReleaseId IN ($firstReleaseId, $secondReleaseId);
+                    """;
+
+                secondFrozenReleaseCommand.Parameters.AddWithValue(
+                    "$firstReleaseId",
+                    firstRelease.ReleaseId.Value.ToString("D"));
+
+                secondFrozenReleaseCommand.Parameters.AddWithValue(
+                    "$secondReleaseId",
+                    secondRelease.ReleaseId.Value.ToString("D"));
+
+                Assert.AreEqual(
+                    2L,
+                    Convert.ToInt64(
+                        secondFrozenReleaseCommand.ExecuteScalar()));
+
+                using SqliteCommand secondFrozenCheckpointCommand =
+                    secondFrozenConnection.CreateCommand();
+
+                secondFrozenCheckpointCommand.CommandText =
+                    """
+                    SELECT COUNT(*)
+                    FROM HLAS_Historical_Checkpoints
+                    WHERE FreezeId = $freezeId;
+                    """;
+
+                secondFrozenCheckpointCommand.Parameters.AddWithValue(
+                    "$freezeId",
+                    firstCheckpoint.FreezeId.Value.ToString("D"));
+
+                Assert.AreEqual(
+                    1L,
+                    Convert.ToInt64(
+                        secondFrozenCheckpointCommand.ExecuteScalar()));
+
+                using SqliteCommand secondFrozenOwnCheckpointCommand =
+                    secondFrozenConnection.CreateCommand();
+
+                secondFrozenOwnCheckpointCommand.CommandText =
+                    """
+                    SELECT COUNT(*)
+                    FROM HLAS_Historical_Checkpoints
+                    WHERE FreezeId = $freezeId;
+                    """;
+
+                secondFrozenOwnCheckpointCommand.Parameters.AddWithValue(
+                    "$freezeId",
+                    secondCheckpoint.FreezeId.Value.ToString("D"));
+
+                Assert.AreEqual(
+                    0L,
+                    Convert.ToInt64(
+                        secondFrozenOwnCheckpointCommand.ExecuteScalar()));
+                Assert.IsTrue(
+                    Directory.Exists(
+                        Path.Combine(
+                            projectRoot,
+                            secondCheckpoint.RelativeCheckpointPath)));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(
+                    projectRoot);
+            }
+        }
         private static ReadinessCheckId CreateReadinessCheck(
             string projectRoot,
             ProjectId projectId,
