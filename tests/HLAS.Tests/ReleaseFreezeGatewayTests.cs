@@ -213,14 +213,13 @@ namespace HLAS.Tests
                         ProjectRole.Admin,
                         release.ReleaseId);
 
-                InvalidOperationException exception =
+                   InvalidOperationException exception =
                     Assert.ThrowsExactly<InvalidOperationException>(
                         () => ReleaseFreezeGateway.CreateReleaseFreeze(
                             projectRoot,
                             userId,
                             ProjectRole.Admin,
                             release.ReleaseId));
-
                 StringAssert.Contains(
                     exception.Message,
                     "SAFE-STOP");
@@ -631,11 +630,37 @@ namespace HLAS.Tests
                         projectRoot,
                         userId,
                         ProjectRole.Admin);
+                string firstManifestPath =
+    Path.Combine(
+        projectRoot,
+        firstCheckpoint.ManifestRelativePath);
 
+                byte[] firstManifestBytesBeforeLaterWork =
+                    File.ReadAllBytes(
+                        firstManifestPath);
+
+                string firstManifestSha256BeforeLaterWork =
+                    firstCheckpoint.ManifestSha256Hex;
                 Assert.AreNotEqual(
                     firstReadinessCheckId,
                     laterReadiness.Check.ReadinessCheckId);
+                byte[] firstManifestBytesAfterLaterWork =
+                    File.ReadAllBytes(
+                        firstManifestPath);
 
+                CollectionAssert.AreEqual(
+                    firstManifestBytesBeforeLaterWork,
+                    firstManifestBytesAfterLaterWork);
+
+                string firstManifestSha256AfterLaterWork =
+                    Convert.ToHexString(
+                        System.Security.Cryptography.SHA256.HashData(
+                            firstManifestBytesAfterLaterWork))
+                    .ToLowerInvariant();
+
+                Assert.AreEqual(
+                    firstManifestSha256BeforeLaterWork,
+                    firstManifestSha256AfterLaterWork);
                 using SqliteConnection connection =
                     OpenDatabase(projectRoot);
 
