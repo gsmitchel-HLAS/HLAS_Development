@@ -179,6 +179,1302 @@ namespace HLAS.Tests
             }
         }
         [TestMethod]
+        public void InternalSeriesTransition_ReleasedBasis_PassesIntegrityVerification()
+        {
+            string projectRoot =
+                CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InternalSeriesTransitionBasisReference basis =
+                    InternalSeriesTransitionBasisVerifier.Verify(
+                        projectRoot,
+                        connection,
+                        transaction,
+                        project.ProjectId,
+                        release.ReleaseId);
+
+                Assert.AreEqual(
+                    release.ReleaseId,
+                    basis.ReleaseId);
+
+                Assert.AreEqual(
+                    checkpoint.FreezeId,
+                    basis.ReleaseFreezeId);
+
+                Assert.AreEqual(
+                    readinessId,
+                    basis.ReadinessCheckId);
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_TamperedReleaseManifest_SafeStops()
+        {
+            string projectRoot =
+                CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                string manifestPath =
+                    Path.Combine(
+                        projectRoot,
+                        checkpoint.ManifestRelativePath);
+
+                File.AppendAllText(
+                    manifestPath,
+                    Environment.NewLine);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => InternalSeriesTransitionBasisVerifier.Verify(
+                            projectRoot,
+                            connection,
+                            transaction,
+                            project.ProjectId,
+                            release.ReleaseId));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_MissingFrozenDatabase_SafeStops()
+        {
+            string projectRoot =
+                CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                string frozenDatabasePath =
+                    Path.Combine(
+                        projectRoot,
+                        checkpoint.RelativeCheckpointPath,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                File.Delete(frozenDatabasePath);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => InternalSeriesTransitionBasisVerifier.Verify(
+                            projectRoot,
+                            connection,
+                            transaction,
+                            project.ProjectId,
+                            release.ReleaseId));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_TamperedControlledEvidence_SafeStops()
+        {
+            string projectRoot =
+                CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                string sourcePath =
+                    Path.Combine(
+                        projectRoot,
+                        "developmental-evidence.txt");
+
+                File.WriteAllText(
+                    sourcePath,
+                    "Original developmental evidence.");
+
+                EvidenceCustodyRecord evidence =
+                    EvidenceCustodyService.Accept(
+                        projectRoot,
+                        sourcePath);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                _ = ReleaseFreezeGateway.CreateReleaseFreeze(
+                    projectRoot,
+                    userId,
+                    ProjectRole.Admin,
+                    release.ReleaseId);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                // First prove the original released basis is valid.
+                _ = InternalSeriesTransitionBasisVerifier.Verify(
+                    projectRoot,
+                    connection,
+                    transaction,
+                    project.ProjectId,
+                    release.ReleaseId);
+
+                string controlledPath =
+                    Path.Combine(
+                        projectRoot,
+                        evidence.RelativeCustodyPath);
+
+                File.AppendAllText(
+                    controlledPath,
+                    "Tampered after release.");
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => InternalSeriesTransitionBasisVerifier.Verify(
+                            projectRoot,
+                            connection,
+                            transaction,
+                            project.ProjectId,
+                            release.ReleaseId));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "Released Source Evidence integrity failed");
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_ReadyWithoutReleaseFreeze_SafeStops()
+        {
+            string projectRoot =
+                CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                // A Release Record exists, but no Release Freeze.
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => InternalSeriesTransitionBasisVerifier.Verify(
+                            projectRoot,
+                            connection,
+                            transaction,
+                            project.ProjectId,
+                            release.ReleaseId));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_TamperedFrozenDatabase_SafeStops()
+        {
+            string projectRoot =
+                CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                string frozenDatabasePath =
+                    Path.Combine(
+                        projectRoot,
+                        checkpoint.RelativeCheckpointPath,
+                        ProjectPackageCreator.DatabaseFileName);
+
+                File.AppendAllText(
+                    frozenDatabasePath,
+                    "Tampered after release.");
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => InternalSeriesTransitionBasisVerifier.Verify(
+                            projectRoot,
+                            connection,
+                            transaction,
+                            project.ProjectId,
+                            release.ReleaseId));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_WriterCommit_PreservesReleasedBasis()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                GovernedOperationRecord operation =
+                    GovernedOperationService.Begin(
+                        projectRoot,
+                        project.ProjectId,
+                        userId,
+                        SeriesId.V,
+                        ProjectRole.Admin,
+                        "V_SERIES_INTERNAL_TRANSITION");
+
+                InternalSeriesTransitionRecord record = new(
+                    InternalSeriesTransitionId.CreateNew(),
+                    project.ProjectId,
+                    operation.OperationId,
+                    SeriesId.A,
+                    release.ReleaseId,
+                    checkpoint.FreezeId,
+                    readinessId,
+                    GovernedTimestamp.CreateNow());
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    InternalSeriesTransitionWriter.Insert(
+                        connection,
+                        transaction,
+                        record);
+
+                    GovernedOperationService.FinalizeSuccessInTransaction(
+                        connection,
+                        transaction,
+                        operation.OperationId);
+
+                    transaction.Commit();
+                }
+
+                using SqliteCommand command =
+                    connection.CreateCommand();
+
+                command.CommandText =
+                    """
+            SELECT
+                ProjectId,
+                OperationId,
+                SourceSeriesId,
+                ReceivingSeriesId,
+                ReleaseId,
+                ReleaseFreezeId,
+                ReadinessCheckId,
+                ReceivedUtc
+            FROM HLAS_Internal_Series_Transitions
+            WHERE TransitionId = $transitionId;
+            """;
+
+                command.Parameters.AddWithValue(
+                    "$transitionId",
+                    record.TransitionId.Value.ToString("D"));
+
+                using SqliteDataReader reader =
+                    command.ExecuteReader();
+
+                Assert.IsTrue(reader.Read());
+
+                Assert.AreEqual(
+                    project.ProjectId.Value.ToString("D"),
+                    reader.GetString(0));
+
+                Assert.AreEqual(
+                    operation.OperationId.Value.ToString("D"),
+                    reader.GetString(1));
+
+                Assert.AreEqual("V", reader.GetString(2));
+                Assert.AreEqual("A", reader.GetString(3));
+
+                Assert.AreEqual(
+                    release.ReleaseId.Value.ToString("D"),
+                    reader.GetString(4));
+
+                Assert.AreEqual(
+                    checkpoint.FreezeId.Value.ToString("D"),
+                    reader.GetString(5));
+
+                Assert.AreEqual(
+                    readinessId.Value.ToString("D"),
+                    reader.GetString(6));
+
+                Assert.AreEqual(
+                    record.ReceivedUtc.Value.ToString("O"),
+                    reader.GetString(7));
+
+                Assert.IsFalse(reader.Read());
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_WriterRollback_DoesNotPersistReceiptOrSuccess()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                GovernedOperationRecord operation =
+                    GovernedOperationService.Begin(
+                        projectRoot,
+                        project.ProjectId,
+                        userId,
+                        SeriesId.V,
+                        ProjectRole.Admin,
+                        "V_SERIES_INTERNAL_TRANSITION");
+
+                InternalSeriesTransitionRecord record = new(
+                    InternalSeriesTransitionId.CreateNew(),
+                    project.ProjectId,
+                    operation.OperationId,
+                    SeriesId.A,
+                    release.ReleaseId,
+                    checkpoint.FreezeId,
+                    readinessId,
+                    GovernedTimestamp.CreateNow());
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using (SqliteTransaction transaction =
+                    connection.BeginTransaction())
+                {
+                    InternalSeriesTransitionWriter.Insert(
+                        connection,
+                        transaction,
+                        record);
+
+                    GovernedOperationService.FinalizeSuccessInTransaction(
+                        connection,
+                        transaction,
+                        operation.OperationId);
+
+                    transaction.Rollback();
+                }
+
+                using SqliteCommand receiptCommand =
+                    connection.CreateCommand();
+
+                receiptCommand.CommandText =
+                    """
+            SELECT COUNT(*)
+            FROM HLAS_Internal_Series_Transitions
+            WHERE TransitionId = $transitionId;
+            """;
+
+                receiptCommand.Parameters.AddWithValue(
+                    "$transitionId",
+                    record.TransitionId.Value.ToString("D"));
+
+                Assert.AreEqual(
+                    0L,
+                    Convert.ToInt64(receiptCommand.ExecuteScalar()));
+
+                using SqliteCommand operationCommand =
+                    connection.CreateCommand();
+
+                operationCommand.CommandText =
+                    """
+            SELECT Outcome
+            FROM HLAS_Governed_Operations
+            WHERE OperationId = $operationId;
+            """;
+
+                operationCommand.Parameters.AddWithValue(
+                    "$operationId",
+                    operation.OperationId.Value.ToString("D"));
+
+                Assert.IsTrue(
+                    operationCommand.ExecuteScalar() is DBNull);
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_GatewayValidRelease_PersistsSuccessfulReceipt()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                InternalSeriesTransitionRecord receipt =
+                    InternalSeriesTransitionGateway.CreateTransition(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        SeriesId.A,
+                        release.ReleaseId);
+
+                Assert.AreEqual(project.ProjectId, receipt.ProjectId);
+                Assert.AreEqual(SeriesId.V, receipt.SourceSeriesId);
+                Assert.AreEqual(SeriesId.A, receipt.ReceivingSeriesId);
+                Assert.AreEqual(release.ReleaseId, receipt.ReleaseId);
+                Assert.AreEqual(checkpoint.FreezeId, receipt.ReleaseFreezeId);
+                Assert.AreEqual(readinessId, receipt.ReadinessCheckId);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteCommand command =
+                    connection.CreateCommand();
+
+                command.CommandText =
+                    """
+            SELECT
+                receipt.ReleaseId,
+                receipt.ReleaseFreezeId,
+                receipt.ReadinessCheckId,
+                operation.Outcome
+            FROM HLAS_Internal_Series_Transitions AS receipt
+            INNER JOIN HLAS_Governed_Operations AS operation
+                ON operation.OperationId = receipt.OperationId
+            WHERE receipt.TransitionId = $transitionId;
+            """;
+
+                command.Parameters.AddWithValue(
+                    "$transitionId",
+                    receipt.TransitionId.Value.ToString("D"));
+
+                using SqliteDataReader reader =
+                    command.ExecuteReader();
+
+                Assert.IsTrue(reader.Read());
+
+                Assert.AreEqual(
+                    release.ReleaseId.Value.ToString("D"),
+                    reader.GetString(0));
+
+                Assert.AreEqual(
+                    checkpoint.FreezeId.Value.ToString("D"),
+                    reader.GetString(1));
+
+                Assert.AreEqual(
+                    readinessId.Value.ToString("D"),
+                    reader.GetString(2));
+
+                Assert.AreEqual("SUCCESS", reader.GetString(3));
+                Assert.IsFalse(reader.Read());
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_ReceiptReadback_VerifiesReleasedBasis()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                InternalSeriesTransitionRecord receipt =
+                    InternalSeriesTransitionGateway.CreateTransition(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        SeriesId.A,
+                        release.ReleaseId);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InternalSeriesTransitionRecord verified =
+                    InternalSeriesTransitionReceiptVerifier.Verify(
+                        projectRoot,
+                        connection,
+                        transaction,
+                        project.ProjectId,
+                        receipt.TransitionId);
+
+                Assert.AreEqual(receipt.TransitionId, verified.TransitionId);
+                Assert.AreEqual(receipt.OperationId, verified.OperationId);
+                Assert.AreEqual(project.ProjectId, verified.ProjectId);
+                Assert.AreEqual(SeriesId.V, verified.SourceSeriesId);
+                Assert.AreEqual(SeriesId.A, verified.ReceivingSeriesId);
+                Assert.AreEqual(release.ReleaseId, verified.ReleaseId);
+                Assert.AreEqual(checkpoint.FreezeId, verified.ReleaseFreezeId);
+                Assert.AreEqual(readinessId, verified.ReadinessCheckId);
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_AlteredReceiptReadinessBasis_SafeStops()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId originalReadiness =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        originalReadiness);
+
+                _ = ReleaseFreezeGateway.CreateReleaseFreeze(
+                    projectRoot,
+                    userId,
+                    ProjectRole.Admin,
+                    release.ReleaseId);
+
+                InternalSeriesTransitionRecord receipt =
+                    InternalSeriesTransitionGateway.CreateTransition(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        SeriesId.A,
+                        release.ReleaseId);
+
+                ReadinessCheckId otherReadiness =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InternalSeriesTransitionRecord original =
+                    InternalSeriesTransitionReceiptVerifier.Verify(
+                        projectRoot,
+                        connection,
+                        transaction,
+                        project.ProjectId,
+                        receipt.TransitionId);
+
+                Assert.AreEqual(
+                    originalReadiness,
+                    original.ReadinessCheckId);
+
+                using (SqliteCommand command =
+                    connection.CreateCommand())
+                {
+                    command.Transaction = transaction;
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Internal_Series_Transitions
+                SET ReadinessCheckId = $readinessId
+                WHERE TransitionId = $transitionId;
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$readinessId",
+                        otherReadiness.Value.ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$transitionId",
+                        receipt.TransitionId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => InternalSeriesTransitionReceiptVerifier.Verify(
+                            projectRoot,
+                            connection,
+                            transaction,
+                            project.ProjectId,
+                            receipt.TransitionId));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "SAFE-STOP");
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_MultipleReceivingSeries_PreserveDistinctReceipts()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                InternalSeriesTransitionRecord first =
+                    InternalSeriesTransitionGateway.CreateTransition(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        SeriesId.A,
+                        release.ReleaseId);
+
+                InternalSeriesTransitionRecord second =
+                    InternalSeriesTransitionGateway.CreateTransition(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        SeriesId.I,
+                        release.ReleaseId);
+
+                Assert.AreNotEqual(
+                    first.TransitionId,
+                    second.TransitionId);
+
+                Assert.AreNotEqual(
+                    first.OperationId,
+                    second.OperationId);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InternalSeriesTransitionRecord verifiedFirst =
+                    InternalSeriesTransitionReceiptVerifier.Verify(
+                        projectRoot,
+                        connection,
+                        transaction,
+                        project.ProjectId,
+                        first.TransitionId);
+
+                InternalSeriesTransitionRecord verifiedSecond =
+                    InternalSeriesTransitionReceiptVerifier.Verify(
+                        projectRoot,
+                        connection,
+                        transaction,
+                        project.ProjectId,
+                        second.TransitionId);
+
+                Assert.AreEqual(
+                    SeriesId.A,
+                    verifiedFirst.ReceivingSeriesId);
+
+                Assert.AreEqual(
+                    SeriesId.I,
+                    verifiedSecond.ReceivingSeriesId);
+
+                Assert.AreEqual(
+                    release.ReleaseId,
+                    verifiedFirst.ReleaseId);
+
+                Assert.AreEqual(
+                    release.ReleaseId,
+                    verifiedSecond.ReleaseId);
+
+                Assert.AreEqual(
+                    checkpoint.FreezeId,
+                    verifiedFirst.ReleaseFreezeId);
+
+                Assert.AreEqual(
+                    checkpoint.FreezeId,
+                    verifiedSecond.ReleaseFreezeId);
+
+                Assert.AreEqual(
+                    readinessId,
+                    verifiedFirst.ReadinessCheckId);
+
+                Assert.AreEqual(
+                    readinessId,
+                    verifiedSecond.ReadinessCheckId);
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_LaterVWork_PreservesEarlierReceipt()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId originalReadiness =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        originalReadiness);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                InternalSeriesTransitionRecord receipt =
+                    InternalSeriesTransitionGateway.CreateTransition(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        SeriesId.A,
+                        release.ReleaseId);
+
+                InternalSeriesTransitionRecord ReadReceipt()
+                {
+                    using SqliteConnection connection =
+                        OpenDatabase(projectRoot);
+
+                    connection.Open();
+
+                    using SqliteTransaction transaction =
+                        connection.BeginTransaction();
+
+                    InternalSeriesTransitionRecord result =
+                        InternalSeriesTransitionReceiptVerifier.Verify(
+                            projectRoot,
+                            connection,
+                            transaction,
+                            project.ProjectId,
+                            receipt.TransitionId);
+
+                    transaction.Rollback();
+
+                    return result;
+                }
+
+                InternalSeriesTransitionRecord before =
+                    ReadReceipt();
+
+                // Later V-series work creates new governed history.
+                ReadinessCheckId laterReadiness =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                Assert.AreNotEqual(
+                    originalReadiness,
+                    laterReadiness);
+
+                InternalSeriesTransitionRecord after =
+                    ReadReceipt();
+
+                Assert.AreEqual(before, after);
+                Assert.AreEqual(receipt.TransitionId, after.TransitionId);
+                Assert.AreEqual(release.ReleaseId, after.ReleaseId);
+                Assert.AreEqual(checkpoint.FreezeId, after.ReleaseFreezeId);
+                Assert.AreEqual(originalReadiness, after.ReadinessCheckId);
+                Assert.AreEqual(SeriesId.A, after.ReceivingSeriesId);
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_LaterRelease_PreservesEarlierReceivingBasis()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId firstReadiness =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord firstRelease =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        firstReadiness);
+
+                HistoricalCheckpointRecord firstCheckpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        firstRelease.ReleaseId);
+
+                InternalSeriesTransitionRecord firstReceipt =
+                    InternalSeriesTransitionGateway.CreateTransition(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        SeriesId.A,
+                        firstRelease.ReleaseId);
+
+                string firstManifestPath =
+                    Path.Combine(
+                        projectRoot,
+                        firstCheckpoint.ManifestRelativePath);
+
+                byte[] originalManifest =
+                    File.ReadAllBytes(firstManifestPath);
+
+                ReadinessCheckId secondReadiness =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord secondRelease =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        secondReadiness);
+
+                HistoricalCheckpointRecord secondCheckpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        secondRelease.ReleaseId);
+
+                InternalSeriesTransitionRecord secondReceipt =
+                    InternalSeriesTransitionGateway.CreateTransition(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        SeriesId.A,
+                        secondRelease.ReleaseId);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InternalSeriesTransitionRecord verifiedFirst =
+                    InternalSeriesTransitionReceiptVerifier.Verify(
+                        projectRoot,
+                        connection,
+                        transaction,
+                        project.ProjectId,
+                        firstReceipt.TransitionId);
+
+                InternalSeriesTransitionRecord verifiedSecond =
+                    InternalSeriesTransitionReceiptVerifier.Verify(
+                        projectRoot,
+                        connection,
+                        transaction,
+                        project.ProjectId,
+                        secondReceipt.TransitionId);
+
+                Assert.AreNotEqual(
+                    verifiedFirst.TransitionId,
+                    verifiedSecond.TransitionId);
+
+                Assert.AreEqual(
+                    firstRelease.ReleaseId,
+                    verifiedFirst.ReleaseId);
+
+                Assert.AreEqual(
+                    firstCheckpoint.FreezeId,
+                    verifiedFirst.ReleaseFreezeId);
+
+                Assert.AreEqual(
+                    firstReadiness,
+                    verifiedFirst.ReadinessCheckId);
+
+                Assert.AreEqual(
+                    secondRelease.ReleaseId,
+                    verifiedSecond.ReleaseId);
+
+                Assert.AreEqual(
+                    secondCheckpoint.FreezeId,
+                    verifiedSecond.ReleaseFreezeId);
+
+                Assert.AreEqual(
+                    secondReadiness,
+                    verifiedSecond.ReadinessCheckId);
+
+                CollectionAssert.AreEqual(
+                    originalManifest,
+                    File.ReadAllBytes(firstManifestPath));
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
         public void CreateReleaseFreeze_SameReleaseTwice_SafeStopsWithoutSecondCheckpoint()
         {
             string projectRoot =

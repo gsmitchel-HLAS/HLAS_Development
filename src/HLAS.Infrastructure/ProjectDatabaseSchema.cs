@@ -21,7 +21,8 @@ namespace HLAS.Infrastructure
         public const int Version13 = 13;
         public const int Version14 = 14;
         public const int Version15 = 15;
-        public const int CurrentDatabaseSchemaVersion = Version15;
+        public const int Version16 = 16;
+        public const int CurrentDatabaseSchemaVersion = Version16;
         public static void InitializeNewDatabase(
             SqliteConnection connection,
             SqliteTransaction transaction,
@@ -110,6 +111,9 @@ namespace HLAS.Infrastructure
     connection,
     transaction);
             CreateHistoricalCheckpointsTable(
+    connection,
+    transaction);
+            CreateInternalSeriesTransitionsTable(
     connection,
     transaction);
             CreateSourceEvidenceMaintenanceResolutionsTable(
@@ -578,6 +582,34 @@ namespace HLAS.Infrastructure
                 Version14,
                 Version15);
         }
+        public static void MigrateVersion15ToVersion16(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            ArgumentNullException.ThrowIfNull(transaction);
+
+            int currentVersion =
+                ReadDatabaseSchemaVersion(
+                    connection,
+                    transaction);
+
+            if (currentVersion != Version15)
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Version 15 to Version 16 migration requires database schema version 15.");
+            }
+
+            CreateInternalSeriesTransitionsTable(
+                connection,
+                transaction);
+
+            UpdateDatabaseSchemaVersion(
+                connection,
+                transaction,
+                Version15,
+                Version16);
+        }
         private static void AddGovernedOperationKindForVersion13(
     SqliteConnection connection,
     SqliteTransaction transaction)
@@ -658,8 +690,7 @@ namespace HLAS.Infrastructure
             ManifestSha256Hex TEXT NOT NULL
                 CHECK (length(ManifestSha256Hex) = 64),
             FrozenUtc TEXT NOT NULL,
-
-            CHECK
+              CHECK
             (
                 CheckpointType <> 'RELEASE_FREEZE'
                 OR ReleaseId IS NOT NULL
@@ -675,6 +706,50 @@ namespace HLAS.Infrastructure
 
             command.ExecuteNonQuery();
         }
+        private static void CreateInternalSeriesTransitionsTable(
+    SqliteConnection connection,
+    SqliteTransaction transaction)
+        {
+            using SqliteCommand command =
+                connection.CreateCommand();
+
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+        CREATE TABLE HLAS_Internal_Series_Transitions
+        (
+            TransitionId TEXT NOT NULL PRIMARY KEY,
+            ProjectId TEXT NOT NULL
+                CHECK (length(trim(ProjectId)) > 0),
+            OperationId TEXT NOT NULL UNIQUE,
+            SourceSeriesId TEXT NOT NULL
+                CHECK (SourceSeriesId = 'V'),
+            ReceivingSeriesId TEXT NOT NULL
+                CHECK
+                (
+                    length(trim(ReceivingSeriesId)) > 0
+                    AND ReceivingSeriesId <> 'V'
+                ),
+            ReleaseId TEXT NOT NULL,
+            ReleaseFreezeId TEXT NOT NULL,
+            ReadinessCheckId TEXT NOT NULL,
+            ReceivedUtc TEXT NOT NULL
+                CHECK (length(trim(ReceivedUtc)) > 0),
+
+            FOREIGN KEY (OperationId)
+                REFERENCES HLAS_Governed_Operations(OperationId),
+            FOREIGN KEY (ReleaseId)
+                REFERENCES HLAS_Release_Records(ReleaseId),
+            FOREIGN KEY (ReleaseFreezeId)
+                REFERENCES HLAS_Historical_Checkpoints(FreezeId),
+            FOREIGN KEY (ReadinessCheckId)
+                REFERENCES HLAS_Readiness_Checks(ReadinessCheckId)
+        );
+        """;
+
+            command.ExecuteNonQuery();
+        }
+
         private static void CreateSourceEvidenceMaintenanceResolutionsTable(
     SqliteConnection connection,
     SqliteTransaction transaction)
