@@ -879,6 +879,140 @@ namespace HLAS.Tests
                 DeleteTemporaryProjectRoot(projectRoot);
             }
         }
+        private sealed class IntegratedTransitionTestBridge
+           : HLAS.Application.IAuthenticationGateway,
+             HLAS.Application.IProjectAuthorizationGateway,
+             HLAS.Application.IInternalSeriesTransitionGateway
+        {
+            private readonly UserId _userId;
+
+            public IntegratedTransitionTestBridge(UserId userId)
+            {
+                _userId = userId;
+            }
+
+            public HLAS.Application.AuthenticationGatewayResult Authenticate(
+                string loginName,
+                string secret)
+            {
+                return HLAS.Application.AuthenticationGatewayResult.Succeeded(
+                    _userId);
+            }
+
+            public HLAS.Application.ProjectAuthorizationGatewayResult Resolve(
+                string projectRoot,
+                UserId userId)
+            {
+                ProjectRole? role =
+                    ProjectAuthorizationStore.ResolveRole(
+                        projectRoot,
+                        userId);
+
+                return role is null
+                    ? HLAS.Application.ProjectAuthorizationGatewayResult.Rejected(
+                        "User lacks project authorization.")
+                    : HLAS.Application.ProjectAuthorizationGatewayResult.Authorized(
+                        role.Value);
+            }
+
+            public InternalSeriesTransitionRecord CreateTransition(
+                string projectRoot,
+                InternalSeriesTransitionAuthority authority,
+                SeriesId receivingSeriesId,
+                ReleaseId releaseId)
+            {
+                return InternalSeriesTransitionGateway.CreateTransition(
+                    projectRoot,
+                    authority,
+                    receivingSeriesId,
+                    releaseId);
+            }
+        }
+        [TestMethod]
+        public void InternalSeriesTransition_AuthenticatedService_PersistsVerifiedReceipt()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        projectRoot,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        projectRoot,
+                        userId,
+                        ProjectRole.Admin,
+                        release.ReleaseId);
+
+                IntegratedTransitionTestBridge bridge = new(userId);
+
+                HLAS.Application.AuthenticationService authentication =
+                    new(bridge);
+
+                HLAS.Application.AuthenticatedIdentity identity =
+                    authentication.Authenticate(
+                        "development-user",
+                        "development-secret");
+
+                HLAS.Application.ProjectAuthorizationService authorization =
+                    new(bridge);
+
+                HLAS.Application.InternalSeriesTransitionService service =
+                    new(authorization, bridge);
+
+                InternalSeriesTransitionRecord receipt =
+                    service.CreateTransition(
+                        projectRoot,
+                        identity,
+                        SeriesId.A,
+                        release.ReleaseId);
+
+                using SqliteConnection connection =
+                    OpenDatabase(projectRoot);
+
+                connection.Open();
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction();
+
+                InternalSeriesTransitionRecord verified =
+                    InternalSeriesTransitionReceiptVerifier.Verify(
+                        projectRoot,
+                        connection,
+                        transaction,
+                        project.ProjectId,
+                        receipt.TransitionId);
+
+                Assert.AreEqual(receipt.TransitionId, verified.TransitionId);
+                Assert.AreEqual(project.ProjectId, verified.ProjectId);
+                Assert.AreEqual(SeriesId.A, verified.ReceivingSeriesId);
+                Assert.AreEqual(release.ReleaseId, verified.ReleaseId);
+                Assert.AreEqual(checkpoint.FreezeId, verified.ReleaseFreezeId);
+                Assert.AreEqual(readinessId, verified.ReadinessCheckId);
+
+                transaction.Rollback();
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
         [TestMethod]
         public void InternalSeriesTransition_GatewayValidRelease_PersistsSuccessfulReceipt()
         {
