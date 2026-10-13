@@ -848,6 +848,38 @@ namespace HLAS.Tests
             }
         }
         [TestMethod]
+        public void InternalSeriesTransition_UnregisteredUser_SafeStops()
+        {
+            string projectRoot = CreateTemporaryProjectRoot();
+
+            try
+            {
+                _ = ProjectPackageCreator.CreateNew(projectRoot);
+
+                InternalSeriesTransitionAuthority authority =
+                    InternalSeriesTransitionAuthority.Create(
+                        projectRoot,
+                        UserId.CreateNew(),
+                        ProjectRole.Admin);
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => InternalSeriesTransitionGateway.CreateTransition(
+                            projectRoot,
+                            authority,
+                            SeriesId.A,
+                            ReleaseId.CreateNew()));
+
+                StringAssert.Contains(
+                    exception.Message,
+                    "project-specific Senior/Admin authority");
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(projectRoot);
+            }
+        }
+        [TestMethod]
         public void InternalSeriesTransition_GatewayValidRelease_PersistsSuccessfulReceipt()
         {
             string projectRoot = CreateTemporaryProjectRoot();
@@ -880,7 +912,7 @@ namespace HLAS.Tests
                         release.ReleaseId);
 
                 InternalSeriesTransitionRecord receipt =
-                    InternalSeriesTransitionGateway.CreateTransition(
+                    CreateTransitionForTest(
                         projectRoot,
                         userId,
                         ProjectRole.Admin,
@@ -977,7 +1009,7 @@ namespace HLAS.Tests
                         release.ReleaseId);
 
                 InternalSeriesTransitionRecord receipt =
-                    InternalSeriesTransitionGateway.CreateTransition(
+                    CreateTransitionForTest(
                         projectRoot,
                         userId,
                         ProjectRole.Admin,
@@ -1048,7 +1080,7 @@ namespace HLAS.Tests
                     release.ReleaseId);
 
                 InternalSeriesTransitionRecord receipt =
-                    InternalSeriesTransitionGateway.CreateTransition(
+                    CreateTransitionForTest(
                         projectRoot,
                         userId,
                         ProjectRole.Admin,
@@ -1157,7 +1189,7 @@ namespace HLAS.Tests
                         release.ReleaseId);
 
                 InternalSeriesTransitionRecord first =
-                    InternalSeriesTransitionGateway.CreateTransition(
+                    CreateTransitionForTest(
                         projectRoot,
                         userId,
                         ProjectRole.Admin,
@@ -1165,7 +1197,7 @@ namespace HLAS.Tests
                         release.ReleaseId);
 
                 InternalSeriesTransitionRecord second =
-                    InternalSeriesTransitionGateway.CreateTransition(
+                    CreateTransitionForTest(
                         projectRoot,
                         userId,
                         ProjectRole.Admin,
@@ -1276,7 +1308,7 @@ namespace HLAS.Tests
                         release.ReleaseId);
 
                 InternalSeriesTransitionRecord receipt =
-                    InternalSeriesTransitionGateway.CreateTransition(
+                   CreateTransitionForTest(
                         projectRoot,
                         userId,
                         ProjectRole.Admin,
@@ -1368,7 +1400,7 @@ namespace HLAS.Tests
                         firstRelease.ReleaseId);
 
                 InternalSeriesTransitionRecord firstReceipt =
-                    InternalSeriesTransitionGateway.CreateTransition(
+                  CreateTransitionForTest(
                         projectRoot,
                         userId,
                         ProjectRole.Admin,
@@ -1404,7 +1436,7 @@ namespace HLAS.Tests
                         secondRelease.ReleaseId);
 
                 InternalSeriesTransitionRecord secondReceipt =
-                    InternalSeriesTransitionGateway.CreateTransition(
+                  CreateTransitionForTest(
                         projectRoot,
                         userId,
                         ProjectRole.Admin,
@@ -2315,11 +2347,39 @@ namespace HLAS.Tests
                     projectRoot);
             }
         }
+        private static InternalSeriesTransitionRecord CreateTransitionForTest(
+           string projectRoot,
+           UserId userId,
+           ProjectRole projectRole,
+           SeriesId receivingSeriesId,
+           ReleaseId releaseId)
+        {
+            InternalSeriesTransitionAuthority authority =
+                InternalSeriesTransitionAuthority.Create(
+                    projectRoot,
+                    userId,
+                    projectRole);
+
+            return InternalSeriesTransitionGateway.CreateTransition(
+                projectRoot,
+                authority,
+                receivingSeriesId,
+                releaseId);
+        }
         private static ReadinessCheckId CreateReadinessCheck(
             string projectRoot,
             ProjectId projectId,
             UserId userId)
         {
+            if (ProjectAuthorizationStore.ResolveRole(
+                   projectRoot,
+                   userId) is null)
+            {
+                ProjectAuthorizationStore.AddAuthorization(
+                    projectRoot,
+                    userId,
+                    ProjectRole.Admin);
+            }
             GovernedOperationRecord operation =
                 GovernedOperationService.Begin(
                     projectRoot,

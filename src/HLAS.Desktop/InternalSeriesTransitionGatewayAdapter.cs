@@ -9,14 +9,13 @@ namespace HLAS.Desktop
     {
         public InternalSeriesTransitionRecord CreateTransition(
             string projectRoot,
-            AuthorizedProjectIdentity authorizedIdentity,
+            InternalSeriesTransitionAuthority transitionAuthority,
             SeriesId receivingSeriesId,
             ReleaseId releaseId)
         {
             return InternalSeriesTransitionGateway.CreateTransition(
                 projectRoot,
-                authorizedIdentity.UserId,
-                authorizedIdentity.ProjectRole,
+                transitionAuthority,
                 receivingSeriesId,
                 releaseId);
         }

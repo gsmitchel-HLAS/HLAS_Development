@@ -51,10 +51,14 @@ namespace HLAS.Application
                 throw new InvalidOperationException(
                     "SAFE-STOP: Internal series transition requires Senior or Admin authority.");
             }
-
+            InternalSeriesTransitionAuthority transitionAuthority =
+                InternalSeriesTransitionAuthority.Create(
+                    projectRoot,
+                    authorizedIdentity.UserId,
+                    authorizedIdentity.ProjectRole);
             return _transitionGateway.CreateTransition(
                 projectRoot,
-                authorizedIdentity,
+               transitionAuthority,
                 receivingSeriesId,
                 releaseId);
         }

@@ -12,13 +12,24 @@ namespace HLAS.Infrastructure
 
         public static InternalSeriesTransitionRecord CreateTransition(
             string projectRoot,
-            UserId userId,
-            ProjectRole projectRole,
+           InternalSeriesTransitionAuthority transitionAuthority,
             SeriesId receivingSeriesId,
             ReleaseId releaseId)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+            ArgumentNullException.ThrowIfNull(transitionAuthority);
 
+            if (!string.Equals(
+                    Path.GetFullPath(projectRoot),
+                    Path.GetFullPath(transitionAuthority.ProjectRoot),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Transition authority belongs to a different project.");
+            }
+
+            UserId userId = transitionAuthority.UserId;
+            ProjectRole projectRole = transitionAuthority.ProjectRole;
             if (projectRole != ProjectRole.Senior &&
                 projectRole != ProjectRole.Admin)
             {
@@ -40,7 +51,19 @@ namespace HLAS.Infrastructure
 
             ProjectManifest project =
                 ProjectPackageReader.Open(fullProjectRoot);
+            ProjectRole? storedProjectRole =
+               ProjectAuthorizationStore.ResolveRole(
+                   fullProjectRoot,
+                   userId);
 
+            if (storedProjectRole is null ||
+                storedProjectRole.Value != projectRole ||
+                (storedProjectRole.Value != ProjectRole.Senior &&
+                 storedProjectRole.Value != ProjectRole.Admin))
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: User lacks the required project-specific Senior/Admin authority.");
+            }
             string databasePath =
                 Path.Combine(
                     fullProjectRoot,

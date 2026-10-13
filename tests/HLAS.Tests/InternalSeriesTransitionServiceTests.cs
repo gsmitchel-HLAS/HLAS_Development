@@ -200,7 +200,7 @@ namespace HLAS.Tests
         {
             public bool Called { get; private set; }
 
-            public AuthorizedProjectIdentity?
+            public InternalSeriesTransitionAuthority
                 ReceivedIdentity
             { get; private set; }
 
@@ -210,7 +210,7 @@ namespace HLAS.Tests
 
             public InternalSeriesTransitionRecord CreateTransition(
                 string projectRoot,
-                AuthorizedProjectIdentity authorizedIdentity,
+                InternalSeriesTransitionAuthority authorizedIdentity,
                 SeriesId receivingSeriesId,
                 ReleaseId releaseId)
             {

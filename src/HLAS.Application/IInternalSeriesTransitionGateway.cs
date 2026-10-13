@@ -6,7 +6,7 @@ namespace HLAS.Application
     {
         InternalSeriesTransitionRecord CreateTransition(
             string projectRoot,
-            AuthorizedProjectIdentity authorizedIdentity,
+            InternalSeriesTransitionAuthority transitionAuthority,
             SeriesId receivingSeriesId,
             ReleaseId releaseId);
     }
