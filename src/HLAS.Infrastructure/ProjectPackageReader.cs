@@ -36,8 +36,9 @@ namespace HLAS.Infrastructure
             if (!File.Exists(manifestPath) ||
                 !File.Exists(databasePath))
             {
-                throw new InvalidOperationException(
-                    "SAFE-STOP: The HLAS project package is incomplete.");
+                throw ProjectPackageFailureMarker.Create(
+                     "SAFE-STOP: The HLAS project package is incomplete.",
+                     ProjectPackageIssue.MissingRequiredFiles);
             }
 
             try
@@ -52,15 +53,17 @@ namespace HLAS.Infrastructure
                 if (manifest.ProjectId.Value !=
                     databaseMetadata.ProjectId)
                 {
-                    throw new InvalidOperationException(
-                        "SAFE-STOP: Manifest ProjectId does not match database ProjectId.");
+                    throw ProjectPackageFailureMarker.Create(
+                        "SAFE-STOP: Manifest ProjectId does not match database ProjectId.",
+                        ProjectPackageIssue.ProjectIdMismatch);
                 }
 
                 if (databaseMetadata.DatabaseSchemaVersion !=
                     ProjectDatabaseSchema.CurrentDatabaseSchemaVersion)
                 {
-                    throw new InvalidOperationException(
-                        "SAFE-STOP: Database schema version is unsupported.");
+                    throw ProjectPackageFailureMarker.Create(
+                       "SAFE-STOP: Database schema version is unsupported.",
+                       ProjectPackageIssue.UnsupportedDatabaseSchema);
                 }
 
                 return manifest;
@@ -94,8 +97,9 @@ namespace HLAS.Infrastructure
                     projectIdElement.GetString(),
                     out Guid projectIdValue))
             {
-                throw new InvalidOperationException(
-                    "SAFE-STOP: Manifest ProjectId is invalid.");
+                throw ProjectPackageFailureMarker.Create(
+                    "SAFE-STOP: Manifest ProjectId is invalid.",
+                    ProjectPackageIssue.InvalidManifestProjectId);
             }
 
             if (!root.TryGetProperty(
@@ -104,8 +108,9 @@ namespace HLAS.Infrastructure
                 !versionElement.TryGetInt32(
                     out int projectFormatVersion))
             {
-                throw new InvalidOperationException(
-                    "SAFE-STOP: Manifest ProjectFormatVersion is invalid.");
+                throw ProjectPackageFailureMarker.Create(
+                   "SAFE-STOP: Manifest ProjectFormatVersion is invalid.",
+                   ProjectPackageIssue.InvalidManifestFormatMetadata);
             }
 
             if (!root.TryGetProperty(
@@ -114,8 +119,9 @@ namespace HLAS.Infrastructure
                 !createdUtcElement.TryGetDateTimeOffset(
                     out DateTimeOffset createdUtcValue))
             {
-                throw new InvalidOperationException(
-                    "SAFE-STOP: Manifest CreatedUtc is invalid.");
+                throw ProjectPackageFailureMarker.Create(
+                     "SAFE-STOP: Manifest CreatedUtc is invalid.",
+                     ProjectPackageIssue.InvalidManifestCreatedUtc);
             }
 
             return new ProjectManifest(
@@ -159,8 +165,9 @@ namespace HLAS.Infrastructure
 
             if (!reader.Read())
             {
-                throw new InvalidOperationException(
-                    "SAFE-STOP: Database project metadata is missing.");
+                throw ProjectPackageFailureMarker.Create(
+                     "SAFE-STOP: Database project metadata is missing.",
+                     ProjectPackageIssue.MissingDatabaseMetadata);
             }
 
             string projectIdText = reader.GetString(0);
@@ -169,8 +176,9 @@ namespace HLAS.Infrastructure
                     projectIdText,
                     out Guid projectId))
             {
-                throw new InvalidOperationException(
-                    "SAFE-STOP: Database ProjectId is invalid.");
+                throw ProjectPackageFailureMarker.Create(
+                     "SAFE-STOP: Database ProjectId is invalid.",
+                     ProjectPackageIssue.InvalidDatabaseProjectId);
             }
 
             int databaseSchemaVersion =
@@ -178,8 +186,9 @@ namespace HLAS.Infrastructure
 
             if (databaseSchemaVersion < 1)
             {
-                throw new InvalidOperationException(
-                    "SAFE-STOP: Database schema version is invalid.");
+                throw ProjectPackageFailureMarker.Create(
+                     "SAFE-STOP: Database schema version is invalid.",
+                     ProjectPackageIssue.InvalidDatabaseSchemaMetadata);
             }
 
             return (
