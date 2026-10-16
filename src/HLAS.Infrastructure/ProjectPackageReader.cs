@@ -72,6 +72,13 @@ namespace HLAS.Infrastructure
             {
                 throw;
             }
+            catch (JsonException exception)
+            {
+                throw ProjectPackageFailureMarker.Create(
+                    "SAFE-STOP: The HLAS project package could not be opened safely.",
+                    ProjectPackageIssue.MalformedManifest,
+                    exception);
+            }
             catch (Exception exception)
             {
                 throw new InvalidOperationException(
@@ -88,7 +95,12 @@ namespace HLAS.Infrastructure
                     File.ReadAllText(manifestPath));
 
             JsonElement root = document.RootElement;
-
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                throw ProjectPackageFailureMarker.Create(
+                    "SAFE-STOP: Manifest root structure is invalid.",
+                    ProjectPackageIssue.MalformedManifest);
+            }
             if (!root.TryGetProperty(
                     "ProjectId",
                     out JsonElement projectIdElement) ||
@@ -105,6 +117,7 @@ namespace HLAS.Infrastructure
             if (!root.TryGetProperty(
                     "ProjectFormatVersion",
                     out JsonElement versionElement) ||
+                     versionElement.ValueKind != JsonValueKind.Number ||
                 !versionElement.TryGetInt32(
                     out int projectFormatVersion))
             {
@@ -116,6 +129,7 @@ namespace HLAS.Infrastructure
             if (!root.TryGetProperty(
                     "CreatedUtc",
                     out JsonElement createdUtcElement) ||
+                     createdUtcElement.ValueKind != JsonValueKind.String ||
                 !createdUtcElement.TryGetDateTimeOffset(
                     out DateTimeOffset createdUtcValue))
             {

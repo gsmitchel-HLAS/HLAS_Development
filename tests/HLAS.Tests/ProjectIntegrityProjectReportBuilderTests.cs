@@ -529,6 +529,460 @@ namespace HLAS.Tests
                 DeleteRoot(root);
             }
         }
+        [TestMethod]
+        public void Build_MalformedManifest_UsesFailureMarkerWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.ManifestFileName);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                File.WriteAllText(
+                    manifestPath,
+                    "{ malformed JSON");
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectPackageReader.Open(root));
+
+                Assert.IsTrue(
+                    ProjectPackageFailureMarker.TryRead(
+                        exception,
+                        out ProjectPackageIssue issue));
+
+                Assert.AreEqual(
+                    ProjectPackageIssue.MalformedManifest,
+                    issue);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_TamperedRegisteredEvidence_ReportsFailureWithoutWrites()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
+            string sourcePath = Path.Combine(root, "Source.txt");
+
+            try
+            {
+                Directory.CreateDirectory(root);
+
+                File.WriteAllText(
+                    sourcePath,
+                    "Developmental registered evidence.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourcePath);
+
+                string controlledPath = Path.Combine(
+                    projectRoot,
+                    evidence.RelativeCustodyPath);
+
+                byte[] corrupted = File.ReadAllBytes(controlledPath);
+                Assert.IsNotEmpty(corrupted);
+
+                corrupted[0] = (byte)(corrupted[0] ^ 1);
+                File.WriteAllBytes(controlledPath, corrupted);
+
+                string databasePath = Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore = File.ReadAllBytes(databasePath);
+                byte[] manifestBefore = File.ReadAllBytes(manifestPath);
+                byte[] evidenceBefore = File.ReadAllBytes(controlledPath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    evidenceBefore,
+                    File.ReadAllBytes(controlledPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_MissingRegisteredEvidence_PreservesPendingAndFailureWithoutWrites()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
+            string sourcePath = Path.Combine(root, "Source.txt");
+
+            try
+            {
+                Directory.CreateDirectory(root);
+
+                File.WriteAllText(
+                    sourcePath,
+                    "Developmental registered evidence.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourcePath);
+
+                string controlledPath = Path.Combine(
+                    projectRoot,
+                    evidence.RelativeCustodyPath);
+
+                Assert.IsTrue(File.Exists(controlledPath));
+                File.Delete(controlledPath);
+                Assert.IsFalse(File.Exists(controlledPath));
+
+                string databasePath = Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                Assert.IsFalse(File.Exists(controlledPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_InvalidManifestRoot_ReportsIntegrityFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.ManifestFileName);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                File.WriteAllText(manifestPath, "[]");
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectPackageReader.Open(root));
+
+                Assert.IsTrue(
+                    ProjectPackageFailureMarker.TryRead(
+                        exception,
+                        out ProjectPackageIssue issue));
+
+                Assert.AreEqual(
+                    ProjectPackageIssue.MalformedManifest,
+                    issue);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_InvalidManifestCreatedUtcType_ReportsIntegrityFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.ManifestFileName);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                System.Text.Json.Nodes.JsonNode manifest =
+                    System.Text.Json.Nodes.JsonNode.Parse(
+                        File.ReadAllText(manifestPath))!;
+
+                manifest["CreatedUtc"] = 42;
+
+                File.WriteAllText(
+                    manifestPath,
+                    manifest.ToJsonString());
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectPackageReader.Open(root));
+
+                Assert.IsTrue(
+                    ProjectPackageFailureMarker.TryRead(
+                        exception,
+                        out ProjectPackageIssue issue));
+
+                Assert.AreEqual(
+                    ProjectPackageIssue.InvalidManifestCreatedUtc,
+                    issue);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_InvalidManifestFormatType_ReportsIntegrityFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.ManifestFileName);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                System.Text.Json.Nodes.JsonNode manifest =
+                    System.Text.Json.Nodes.JsonNode.Parse(
+                        File.ReadAllText(manifestPath))!;
+
+                manifest["ProjectFormatVersion"] = "invalid-type";
+
+                File.WriteAllText(
+                    manifestPath,
+                    manifest.ToJsonString());
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                InvalidOperationException exception =
+                    Assert.ThrowsExactly<InvalidOperationException>(
+                        () => ProjectPackageReader.Open(root));
+
+                Assert.IsTrue(
+                    ProjectPackageFailureMarker.TryRead(
+                        exception,
+                        out ProjectPackageIssue issue));
+
+                Assert.AreEqual(
+                    ProjectPackageIssue.InvalidManifestFormatMetadata,
+                    issue);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
         private static ProjectIntegrityCheckItem GetItem(
             ProjectIntegrityCheckReport report,
             string checkCode)

@@ -245,6 +245,97 @@ namespace HLAS.Tests
                 DeleteRoot(sample.Root);
             }
         }
+        [TestMethod]
+        public void Build_ReceivedSource_PreservesVerifiedChecksWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                Assert.IsNotNull(sample.ControlledPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                string controlledPath = sample.ControlledPath!;
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] evidenceBefore =
+                    File.ReadAllBytes(controlledPath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.HasCount(15, report.Items);
+
+                Assert.AreEqual(
+                    "PROJECT_IDENTITY",
+                    report.Items[0].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    "SOURCE_EVIDENCE_REQUIREMENTS",
+                    report.Items[1].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    "SOURCE_EVIDENCE_CUSTODY",
+                    report.Items[2].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    "PROJECT_WIDE_SNAPSHOT_CONSISTENCY",
+                    report.Items[14].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    evidenceBefore,
+                    File.ReadAllBytes(controlledPath));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
         private static (
             string Root,
             string ProjectRoot,

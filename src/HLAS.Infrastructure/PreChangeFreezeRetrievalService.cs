@@ -205,7 +205,7 @@ namespace HLAS.Infrastructure
                 new()
                 {
                     DataSource = databasePath,
-                    Mode = SqliteOpenMode.ReadWrite,
+                    Mode = SqliteOpenMode.ReadOnly,
                     Pooling = false
                 };
 
