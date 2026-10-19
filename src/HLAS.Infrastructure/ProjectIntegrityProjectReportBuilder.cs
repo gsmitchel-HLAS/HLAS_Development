@@ -9,8 +9,25 @@ namespace HLAS.Infrastructure
     internal static class ProjectIntegrityProjectReportBuilder
     {
         internal static ProjectIntegrityCheckReport Build(
+    string projectRoot,
+    ProjectId expectedProjectId)
+        {
+            return BuildCore(projectRoot, expectedProjectId, null);
+        }
+
+        internal static ProjectIntegrityCheckReport BuildWithTestObserver(
             string projectRoot,
-            ProjectId expectedProjectId)
+            ProjectId expectedProjectId,
+            Action<string> afterCheck)
+        {
+            ArgumentNullException.ThrowIfNull(afterCheck);
+            return BuildCore(projectRoot, expectedProjectId, afterCheck);
+        }
+
+        private static ProjectIntegrityCheckReport BuildCore(
+            string projectRoot,
+            ProjectId expectedProjectId,
+            Action<string>? afterCheck)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 
@@ -66,6 +83,7 @@ namespace HLAS.Infrastructure
                 else
                 {
                     items.Add(Run(check.Code, check.Verify));
+                    afterCheck?.Invoke(check.Code);
                 }
             }
 

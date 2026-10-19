@@ -336,6 +336,131 @@ namespace HLAS.Tests
                 DeleteRoot(sample.Root);
             }
         }
+        [TestMethod]
+        public void Check_CrossVerifierEvidenceChange_LeavesSnapshotNotChecked()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                Assert.IsNotNull(sample.ControlledPath);
+
+                ProjectIntegrityCheckItem requirementsBefore =
+                    ProjectIntegritySourceEvidenceRequirementsVerifier.Check(
+                        sample.ProjectRoot);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    requirementsBefore.Status);
+
+                File.AppendAllText(
+                    sample.ControlledPath!,
+                    "Changed between independent verifier reads.");
+
+                ProjectIntegrityCheckItem custodyAfter =
+                    ProjectIntegrityRegisteredSourceEvidenceVerifier.Check(
+                        sample.ProjectRoot);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    custodyAfter.Status);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_EvidenceChangesBetweenChecks_PreservesMixedResults()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                Assert.IsNotNull(sample.ControlledPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore = File.ReadAllBytes(databasePath);
+                byte[] manifestBefore = File.ReadAllBytes(manifestPath);
+
+                int changes = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        sample.ProjectRoot,
+                        project.ProjectId,
+                        code =>
+                        {
+                            if (code == "SOURCE_EVIDENCE_REQUIREMENTS")
+                            {
+                                File.AppendAllText(
+                                    sample.ControlledPath!,
+                                    "Changed between checks.");
+                                changes++;
+                            }
+                        });
+
+                Assert.AreEqual(1, changes);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
         private static (
             string Root,
             string ProjectRoot,

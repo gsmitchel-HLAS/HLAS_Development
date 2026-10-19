@@ -1078,6 +1078,236 @@ namespace HLAS.Tests
                 DeleteRoot(root);
             }
         }
+        [TestMethod]
+        public void Build_SeparateDatabaseObservations_DoNotClaimProjectWideSnapshot()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                ProjectIntegrityCheckItem first =
+                    ProjectIntegrityGovernedOperationsVerifier.Check(root);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    first.Status);
+
+                GovernedOperationService.Begin(
+                    root,
+                    project.ProjectId,
+                    UserId.CreateNew(),
+                    SeriesId.V,
+                    ProjectRole.Admin,
+                    "DEVELOPMENTAL_TEST");
+
+                ProjectIntegrityCheckItem second =
+                    ProjectIntegrityGovernedOperationsVerifier.Check(root);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    second.Status);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore = File.ReadAllBytes(databasePath);
+                byte[] manifestBefore = File.ReadAllBytes(manifestPath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    GetItem(report, "GOVERNED_OPERATIONS").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_EvidenceChangesDuringReport_PreservesSnapshotNotChecked()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
+
+            try
+            {
+                Directory.CreateDirectory(root);
+
+                string sourcePath = Path.Combine(root, "Source.txt");
+                File.WriteAllText(sourcePath, "Original developmental evidence.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot, sourcePath);
+
+                string controlledPath = Path.Combine(
+                    projectRoot, evidence.RelativeCustodyPath);
+
+                int changes = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        projectRoot,
+                        project.ProjectId,
+                        code =>
+                        {
+                            if (code == "SOURCE_EVIDENCE_CUSTODY")
+                            {
+                                File.AppendAllText(
+                                    controlledPath,
+                                    "Changed during report.");
+                                changes++;
+                            }
+                        });
+
+                Assert.AreEqual(1, changes);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    ProjectIntegrityRegisteredSourceEvidenceVerifier
+                        .Check(projectRoot).Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(
+                        report,
+                        "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_OperationChangesDuringReport_PreservesSnapshotNotChecked()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                GovernedOperationRecord operation =
+                    GovernedOperationService.Begin(
+                        root,
+                        project.ProjectId,
+                        UserId.CreateNew(),
+                        SeriesId.V,
+                        ProjectRole.Admin,
+                        "DEVELOPMENTAL_TEST");
+
+                int changes = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        project.ProjectId,
+                        code =>
+                        {
+                            if (code == "GOVERNED_OPERATIONS")
+                            {
+                                GovernedOperationService.FinalizeSuccess(
+                                    root,
+                                    operation.OperationId);
+                                changes++;
+                            }
+                        });
+
+                Assert.AreEqual(1, changes);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    GetItem(report, "GOVERNED_OPERATIONS").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    ProjectIntegrityGovernedOperationsVerifier
+                        .Check(root).Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(
+                        report,
+                        "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_SkippedChecks_DoNotInvokeTestObserver()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                ProjectId wrongId = ProjectId.CreateNew();
+
+                Assert.AreNotEqual(project.ProjectId, wrongId);
+
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        wrongId,
+                        _ => observedChecks++);
+
+                Assert.AreEqual(0, observedChecks);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
         private static ProjectIntegrityCheckItem GetItem(
             ProjectIntegrityCheckReport report,
             string checkCode)
