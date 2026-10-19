@@ -983,6 +983,101 @@ namespace HLAS.Tests
                 DeleteRoot(root);
             }
         }
+        [TestMethod]
+        public void Build_SeparateEvidenceObservations_DoNotClaimProjectWideSnapshot()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
+            string sourcePath = Path.Combine(root, "Source.txt");
+
+            try
+            {
+                Directory.CreateDirectory(root);
+
+                File.WriteAllText(
+                    sourcePath,
+                    "Developmental snapshot observation evidence.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot,
+                        sourcePath);
+
+                ProjectIntegrityCheckItem first =
+                    ProjectIntegrityRegisteredSourceEvidenceVerifier.Check(
+                        projectRoot);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    first.Status);
+
+                string controlledPath = Path.Combine(
+                    projectRoot,
+                    evidence.RelativeCustodyPath);
+
+                byte[] changed = File.ReadAllBytes(controlledPath);
+                Assert.IsNotEmpty(changed);
+
+                changed[0] = (byte)(changed[0] ^ 1);
+                File.WriteAllBytes(controlledPath, changed);
+
+                ProjectIntegrityCheckItem second =
+                    ProjectIntegrityRegisteredSourceEvidenceVerifier.Check(
+                        projectRoot);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    second.Status);
+
+                string databasePath = Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore = File.ReadAllBytes(databasePath);
+                byte[] manifestBefore = File.ReadAllBytes(manifestPath);
+                byte[] evidenceBefore = File.ReadAllBytes(controlledPath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    evidenceBefore,
+                    File.ReadAllBytes(controlledPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
         private static ProjectIntegrityCheckItem GetItem(
             ProjectIntegrityCheckReport report,
             string checkCode)
