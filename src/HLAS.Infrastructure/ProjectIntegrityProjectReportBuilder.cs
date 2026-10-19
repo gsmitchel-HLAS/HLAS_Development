@@ -87,9 +87,13 @@ namespace HLAS.Infrastructure
                 }
             }
 
-            items.Add(NotChecked(
-                "HISTORICAL_REQUIREMENT_APPLICABILITY",
-                "Full historical requirement-item applicability and Data-As-Of reconstruction have not been independently verified. Structural revision lineage is checked separately."));
+            items.Add(identity.Status == ProjectIntegrityCheckStatus.Verified
+    ? Run(
+        "HISTORICAL_REQUIREMENT_APPLICABILITY",
+        () => ProjectIntegrityHistoricalRequirementCoverageVerifier.Check(projectRoot))
+    : NotChecked(
+        "HISTORICAL_REQUIREMENT_APPLICABILITY",
+        "Project identity verification did not pass. This check was not attempted."));
 
             items.Add(NotChecked(
                 "BACKUP_RESTORE_COVERAGE",

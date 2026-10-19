@@ -11,6 +11,44 @@ namespace HLAS.Tests
     public sealed class ProjectIntegritySourceEvidenceRequirementsVerifierTests
     {
         [TestMethod]
+        public void Build_NoEarlierRequirementRevisions_RemainsNotCheckedWithoutWrites()
+        {
+            var sample = CreateProject("PENDING");
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                byte[] before = ReadDatabaseBytes(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "HISTORICAL_REQUIREMENT_APPLICABILITY",
+                    report.Items[12].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[12].Status);
+
+                StringAssert.Contains(
+                    report.Items[12].Detail,
+                    "0 earlier requirement revisions examined");
+
+                CollectionAssert.AreEqual(
+                    before,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
         public void Check_NoRevision_ReturnsPendingWithoutWrites()
         {
             string root = NewRoot();
@@ -440,7 +478,7 @@ namespace HLAS.Tests
 
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.IntegrityFailure,
-                    report.Items[2].Status);
+                     report.Items[2].Status);
 
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.NotChecked,
@@ -455,6 +493,214 @@ namespace HLAS.Tests
                 CollectionAssert.AreEqual(
                     manifestBefore,
                     File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_LaterRequirementRevision_DoesNotClaimHistoricalApplicability()
+        {
+            var sample = CreateProject("PENDING");
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    string operationId = Guid.NewGuid().ToString("D");
+                    string revisionId = Guid.NewGuid().ToString("D");
+                    string timestamp =
+                        DateTimeOffset.UtcNow.AddSeconds(1).ToString("O");
+
+                    using SqliteTransaction transaction =
+                        connection.BeginTransaction();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.Transaction = transaction;
+                    command.CommandText =
+                        """
+                INSERT INTO HLAS_Governed_Operations
+                (OperationId, ProjectId, UserId, SeriesId,
+                 ProjectRole, StartedUtc, CompletedUtc, Outcome)
+                VALUES
+                ($operationId, $projectId, $userId, 'V',
+                 'Admin', $timestamp, $timestamp, 'SUCCESS');
+
+                INSERT INTO HLAS_Source_Evidence_Requirement_Revisions
+                (RequirementRevisionId, RevisionNumber,
+                 PriorRequirementRevisionId, OperationId, ApprovedUtc)
+                SELECT $revisionId, 2, RequirementRevisionId,
+                       $operationId, $timestamp
+                FROM HLAS_Source_Evidence_Requirement_Revisions
+                WHERE RevisionNumber = 1;
+
+                INSERT INTO HLAS_Source_Evidence_Requirement_Items
+                (RequirementRevisionId, RequirementKey,
+                 RequirementState, EvidenceId, NotRequiredReason)
+                VALUES
+                ($revisionId, 'DEVELOPMENTAL_SOURCE',
+                 'NOT_REQUIRED', NULL, 'Developmental revision.');
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$operationId", operationId);
+                    command.Parameters.AddWithValue(
+                        "$revisionId", revisionId);
+                    command.Parameters.AddWithValue(
+                        "$projectId", project.ProjectId.Value.ToString("D"));
+                    command.Parameters.AddWithValue(
+                        "$userId", Guid.NewGuid().ToString("D"));
+                    command.Parameters.AddWithValue(
+                        "$timestamp", timestamp);
+
+                    command.ExecuteNonQuery();
+                    transaction.Commit();
+                }
+                ProjectIntegrityCheckReport intact =
+    ProjectIntegrityProjectReportBuilder.Build(
+        sample.ProjectRoot,
+        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    intact.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    intact.Items[3].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    intact.Items[12].Status);
+                StringAssert.Contains(
+    intact.Items[12].Detail,
+    "1 earlier requirement revisions examined for item presence");
+                using (SqliteConnection connection = new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand removeItem =
+                        connection.CreateCommand();
+
+                    removeItem.CommandText =
+                        """
+        DELETE FROM HLAS_Source_Evidence_Requirement_Items
+        WHERE RequirementRevisionId =
+        (
+            SELECT RequirementRevisionId
+            FROM HLAS_Source_Evidence_Requirement_Revisions
+            WHERE RevisionNumber = 1
+        );
+        """;
+
+                    Assert.AreEqual(1, removeItem.ExecuteNonQuery());
+                }
+                ProjectIntegrityCheckItem historicalCoverage =
+    ProjectIntegrityHistoricalRequirementCoverageVerifier.Check(
+        sample.ProjectRoot);
+
+                Assert.AreEqual(
+                    "HISTORICAL_REQUIREMENT_APPLICABILITY",
+                    historicalCoverage.CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    historicalCoverage.Status);
+
+                StringAssert.Contains(
+                    historicalCoverage.Detail,
+                    "Historical requirement revisions without recorded items: 1.");
+                ProjectIntegrityCheckReport missingHistoricalItem =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    missingHistoricalItem.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    missingHistoricalItem.Items[3].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    missingHistoricalItem.Items[12].Status);
+                StringAssert.Contains(
+    missingHistoricalItem.Items[12].Detail,
+    "Historical requirement revisions without recorded items: 1.");
+                using (SqliteConnection connection = new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand historical =
+                        connection.CreateCommand();
+                      historical.CommandText =
+                        """
+        UPDATE HLAS_Governed_Operations
+        SET Outcome = 'SAFE-STOP',
+            Decision = 'REJECTED',
+            Reason = 'Intentional developmental history test.'
+        WHERE OperationId =
+        (
+            SELECT OperationId
+            FROM HLAS_Source_Evidence_Requirement_Revisions
+            WHERE RevisionNumber = 1
+        );
+        """;
+
+                    Assert.AreEqual(1, historical.ExecuteNonQuery());
+                }
+                SqliteConnection.ClearAllPools();
+                byte[] databaseBefore = File.ReadAllBytes(databasePath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[1].Status);
+                Assert.AreEqual(
+    "LINEAGE_STRUCTURE",
+    report.Items[3].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[3].Status);
+                Assert.AreEqual(
+                    "HISTORICAL_REQUIREMENT_APPLICABILITY",
+                    report.Items[12].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[12].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
             }
             finally
             {
