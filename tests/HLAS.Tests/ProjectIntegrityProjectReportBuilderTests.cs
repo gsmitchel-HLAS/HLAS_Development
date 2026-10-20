@@ -86,7 +86,88 @@ namespace HLAS.Tests
                 DeleteRoot(root);
             }
         }
+        [TestMethod]
+        public void Build_InvalidManifest_PreservesEntireProjectFileSet()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
 
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                string manifestPath = Path.Combine(
+                    projectRoot, ProjectPackageCreator.ManifestFileName);
+
+                File.WriteAllText(manifestPath, "[]");
+
+                SqliteConnection.ClearAllPools();
+
+                string[] beforeFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(projectRoot, path)))
+                    .ToArray();
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] afterFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(projectRoot, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_InvalidProjectPath_RemainsNotChecked()
+        {
+            int observedChecks = 0;
+
+            ProjectIntegrityCheckReport report =
+                ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                    "invalid\0project",
+                    ProjectId.CreateNew(),
+                    _ => observedChecks++);
+
+            Assert.AreEqual(0, observedChecks);
+
+            foreach (ProjectIntegrityCheckItem item in report.Items)
+            {
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    item.Status,
+                    $"Unexpected status: {item.CheckCode}");
+            }
+        }
         [TestMethod]
         public void Build_WrongProjectId_PreservesFailureAndSkipsOtherChecks()
         {
@@ -601,6 +682,215 @@ namespace HLAS.Tests
             }
         }
         [TestMethod]
+        public void Build_HealthyEvidence_PreservesEntireProjectFileSet()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
+
+            try
+            {
+                Directory.CreateDirectory(root);
+
+                string sourcePath = Path.Combine(root, "Source.txt");
+                File.WriteAllText(sourcePath, "Developmental evidence.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                _ = ProductionSourceEvidenceIntakeGateway.Accept(
+                    projectRoot, sourcePath);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] beforeFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(projectRoot, path)))
+                    .ToArray();
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot, project.ProjectId);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] afterFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(projectRoot, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_HealthyRegisteredEvidence_DoesNotWrite()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
+
+            try
+            {
+                Directory.CreateDirectory(root);
+
+                string sourcePath = Path.Combine(root, "Source.txt");
+                File.WriteAllText(sourcePath, "Developmental source.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot, sourcePath);
+
+                string databasePath = Path.Combine(
+                    projectRoot, ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    projectRoot, ProjectPackageCreator.ManifestFileName);
+
+                string controlledPath = Path.Combine(
+                    projectRoot, evidence.RelativeCustodyPath);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore = File.ReadAllBytes(databasePath);
+                byte[] manifestBefore = File.ReadAllBytes(manifestPath);
+                byte[] evidenceBefore = File.ReadAllBytes(controlledPath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore, File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore, File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    evidenceBefore, File.ReadAllBytes(controlledPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_TamperedEvidence_PreservesEntireProjectFileSet()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
+
+            try
+            {
+                Directory.CreateDirectory(root);
+
+                string sourcePath = Path.Combine(root, "Source.txt");
+                File.WriteAllText(sourcePath, "Developmental evidence.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot, sourcePath);
+
+                string controlledPath = Path.Combine(
+                    projectRoot, evidence.RelativeCustodyPath);
+
+                byte[] tampered = File.ReadAllBytes(controlledPath);
+                Assert.IsNotEmpty(tampered);
+
+                tampered[0] ^= 1;
+                File.WriteAllBytes(controlledPath, tampered);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] beforeFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(projectRoot, path)))
+                    .ToArray();
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] afterFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(projectRoot, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
         public void Build_TamperedRegisteredEvidence_ReportsFailureWithoutWrites()
         {
             string root = NewRoot();
@@ -673,6 +963,87 @@ namespace HLAS.Tests
                 CollectionAssert.AreEqual(
                     evidenceBefore,
                     File.ReadAllBytes(controlledPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_MissingEvidence_PreservesEntireProjectFileSet()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
+
+            try
+            {
+                Directory.CreateDirectory(root);
+
+                string sourcePath = Path.Combine(root, "Source.txt");
+                File.WriteAllText(sourcePath, "Developmental evidence.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot, sourcePath);
+
+                string controlledPath = Path.Combine(
+                    projectRoot, evidence.RelativeCustodyPath);
+
+                Assert.IsTrue(File.Exists(controlledPath));
+                File.Delete(controlledPath);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] beforeFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(projectRoot, path)))
+                    .ToArray();
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] afterFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(projectRoot, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
+
+                Assert.IsFalse(File.Exists(controlledPath));
             }
             finally
             {
@@ -1272,6 +1643,40 @@ namespace HLAS.Tests
             }
         }
         [TestMethod]
+        public void Build_HistoricalRequirementCheck_InvokesTestObserver()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                int observed = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        project.ProjectId,
+                        code =>
+                        {
+                            if (code == "HISTORICAL_REQUIREMENT_APPLICABILITY")
+                                observed++;
+                        });
+
+                Assert.AreEqual(1, observed);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "HISTORICAL_REQUIREMENT_APPLICABILITY").Status);
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+
         public void Build_SkippedChecks_DoNotInvokeTestObserver()
         {
             string root = NewRoot();

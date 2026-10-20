@@ -701,6 +701,57 @@ namespace HLAS.Tests
                 CollectionAssert.AreEqual(
                     databaseBefore,
                     File.ReadAllBytes(databasePath));
+                int injected = 0;
+
+                ProjectIntegrityCheckReport observed =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        sample.ProjectRoot,
+                        project.ProjectId,
+                        code =>
+                        {
+                            if (code != "HISTORICAL_REQUIREMENT_APPLICABILITY")
+                                return;
+
+                            using SqliteConnection changeConnection =
+                                new(builder.ToString());
+
+                            changeConnection.Open();
+
+                            using SqliteCommand restore =
+                                changeConnection.CreateCommand();
+
+                            restore.CommandText =
+                                """
+                INSERT INTO HLAS_Source_Evidence_Requirement_Items
+                (RequirementRevisionId, RequirementKey,
+                 RequirementState, EvidenceId, NotRequiredReason)
+                SELECT RequirementRevisionId, 'DEVELOPMENTAL_SOURCE',
+                       'NOT_REQUIRED', NULL, 'Test-only history change.'
+                FROM HLAS_Source_Evidence_Requirement_Revisions
+                WHERE RevisionNumber = 1;
+                """;
+
+                            Assert.AreEqual(1, restore.ExecuteNonQuery());
+                            injected++;
+                        });
+
+                Assert.AreEqual(1, injected);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    observed.Items[12].Status);
+
+                StringAssert.Contains(
+                    observed.Items[12].Detail,
+                    "Historical requirement revisions without recorded items: 1.");
+
+                ProjectIntegrityCheckItem afterChange =
+                    ProjectIntegrityHistoricalRequirementCoverageVerifier.Check(
+                        sample.ProjectRoot);
+
+                StringAssert.Contains(
+                    afterChange.Detail,
+                    "1 earlier requirement revisions examined for item presence");
             }
             finally
             {

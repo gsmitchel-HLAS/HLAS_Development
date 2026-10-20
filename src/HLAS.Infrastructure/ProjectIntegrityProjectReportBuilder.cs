@@ -94,7 +94,10 @@ namespace HLAS.Infrastructure
     : NotChecked(
         "HISTORICAL_REQUIREMENT_APPLICABILITY",
         "Project identity verification did not pass. This check was not attempted."));
-
+            if (identity.Status == ProjectIntegrityCheckStatus.Verified)
+            {
+                afterCheck?.Invoke("HISTORICAL_REQUIREMENT_APPLICABILITY");
+            }
             items.Add(NotChecked(
                 "BACKUP_RESTORE_COVERAGE",
                 "Future backup/restore integrity specifics remain outside this bounded verification foundation."));
