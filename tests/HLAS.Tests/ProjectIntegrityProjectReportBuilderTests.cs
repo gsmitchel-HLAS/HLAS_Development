@@ -189,7 +189,16 @@ namespace HLAS.Tests
                 SqliteConnection.ClearAllPools();
 
                 byte[] before = File.ReadAllBytes(databasePath);
+                string[] beforeFiles = Directory
+                       .GetFiles(root, "*", SearchOption.AllDirectories)
+                       .Select(path => Path.GetRelativePath(root, path))
+                       .OrderBy(path => path, StringComparer.Ordinal)
+                       .ToArray();
 
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(root, path)))
+                    .ToArray();
                 ProjectIntegrityCheckReport report =
                     ProjectIntegrityProjectReportBuilder.Build(
                         root,
@@ -217,6 +226,22 @@ namespace HLAS.Tests
                 CollectionAssert.AreEqual(
                     before,
                     File.ReadAllBytes(databasePath));
+                string[] afterFiles = Directory
+    .GetFiles(root, "*", SearchOption.AllDirectories)
+    .Select(path => Path.GetRelativePath(root, path))
+    .OrderBy(path => path, StringComparer.Ordinal)
+    .ToArray();
+
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(root, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
             }
             finally
             {
@@ -326,7 +351,16 @@ namespace HLAS.Tests
 
                 byte[] databaseBefore =
                     File.ReadAllBytes(databasePath);
+                string[] beforeFiles = Directory
+                    .GetFiles(root, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(root, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
 
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(root, path)))
+                    .ToArray();
                 byte[] manifestBefore =
                     File.ReadAllBytes(manifestPath);
 
@@ -352,7 +386,22 @@ namespace HLAS.Tests
                 CollectionAssert.AreEqual(
                     databaseBefore,
                     File.ReadAllBytes(databasePath));
+                string[] afterFiles = Directory
+                    .GetFiles(root, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(root, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
 
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(root, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
                 CollectionAssert.AreEqual(
                     manifestBefore,
                     File.ReadAllBytes(manifestPath));
@@ -408,7 +457,16 @@ namespace HLAS.Tests
                 SqliteConnection.ClearAllPools();
 
                 byte[] before = File.ReadAllBytes(databasePath);
+                string[] beforeFiles = Directory
+                    .GetFiles(root, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(root, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
 
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(root, path)))
+                    .ToArray();
                 ProjectIntegrityCheckReport report =
                     ProjectIntegrityProjectReportBuilder.Build(
                         root,
@@ -421,6 +479,90 @@ namespace HLAS.Tests
                 CollectionAssert.AreEqual(
                     before,
                     File.ReadAllBytes(databasePath));
+                SqliteConnection.ClearAllPools();
+
+                string[] afterFiles = Directory
+                    .GetFiles(root, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(root, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(root, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_MissingDatabase_PreservesEntireProjectFileSet()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                string databasePath = Path.Combine(
+                    projectRoot, ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+                File.Delete(databasePath);
+
+                string[] beforeFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(projectRoot, path)))
+                    .ToArray();
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] afterFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(projectRoot, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
+
+                Assert.IsFalse(File.Exists(databasePath));
             }
             finally
             {
@@ -451,7 +593,16 @@ namespace HLAS.Tests
 
                 byte[] before =
                     File.ReadAllBytes(databasePath);
+                string[] beforeFiles = Directory
+    .GetFiles(root, "*", SearchOption.AllDirectories)
+    .Select(path => Path.GetRelativePath(root, path))
+    .OrderBy(path => path, StringComparer.Ordinal)
+    .ToArray();
 
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(root, path)))
+                    .ToArray();
                 ProjectIntegrityCheckReport report =
                     ProjectIntegrityProjectReportBuilder.Build(
                         root,
@@ -464,7 +615,24 @@ namespace HLAS.Tests
                 CollectionAssert.AreEqual(
                     before,
                     File.ReadAllBytes(databasePath));
+                SqliteConnection.ClearAllPools();
 
+                string[] afterFiles = Directory
+                    .GetFiles(root, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(root, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(root, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
                 Assert.IsFalse(File.Exists(manifestPath));
             }
             finally
