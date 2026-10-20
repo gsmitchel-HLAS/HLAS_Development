@@ -169,6 +169,136 @@ namespace HLAS.Tests
             }
         }
         [TestMethod]
+        public void Build_MissingProjectRoot_RemainsNotCheckedWithoutCreatingFiles()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                Assert.IsFalse(Directory.Exists(root));
+
+                int observedChecks = 0;
+                ProjectId projectId = ProjectId.CreateNew();
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        projectId,
+                        _ => observedChecks++);
+
+                Assert.AreEqual(projectId, report.ProjectId);
+                Assert.HasCount(15, report.Items);
+                Assert.AreEqual(0, observedChecks);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status,
+                        $"Unexpected status: {item.CheckCode}");
+                }
+
+                Assert.IsFalse(Directory.Exists(root));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_ProjectRootIsFile_RemainsNotCheckedWithoutWrites()
+        {
+            string workspace = NewRoot();
+
+            try
+            {
+                Directory.CreateDirectory(workspace);
+
+                string projectRoot =
+                    Path.Combine(workspace, "ProjectAsFile");
+
+                File.WriteAllText(projectRoot, "not a project folder");
+
+                byte[] before = File.ReadAllBytes(projectRoot);
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        projectRoot,
+                        ProjectId.CreateNew(),
+                        _ => observedChecks++);
+
+                Assert.HasCount(15, report.Items);
+                Assert.AreEqual(0, observedChecks);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status,
+                        $"Unexpected status: {item.CheckCode}");
+                }
+
+                CollectionAssert.AreEqual(
+                    before,
+                    File.ReadAllBytes(projectRoot));
+
+                Assert.HasCount(
+                    1,
+                    Directory.GetFiles(
+                        workspace, "*", SearchOption.AllDirectories));
+            }
+            finally
+            {
+                DeleteRoot(workspace);
+            }
+        }
+        [TestMethod]
+        public void Build_EmptyProjectFolder_ReportsFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                Directory.CreateDirectory(root);
+
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        ProjectId.CreateNew(),
+                        _ => observedChecks++);
+
+                Assert.HasCount(15, report.Items);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    if (item.CheckCode == "PROJECT_IDENTITY")
+                        continue;
+
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status,
+                        $"Unexpected status: {item.CheckCode}");
+                }
+
+                Assert.AreEqual(0, observedChecks);
+
+                Assert.HasCount(
+                    0,
+                    Directory.GetFileSystemEntries(root));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
         public void Build_WrongProjectId_PreservesFailureAndSkipsOtherChecks()
         {
             string root = NewRoot();
@@ -412,6 +542,263 @@ namespace HLAS.Tests
             }
         }
         [TestMethod]
+        public void Build_MissingDatabaseMetadata_ReportsFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string databasePath = Path.Combine(
+                    root, ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    root, ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        DELETE FROM HLAS_Project_Metadata
+                        WHERE SingletonId = 1;
+                        """;
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        project.ProjectId,
+                        _ => observedChecks++);
+
+                Assert.HasCount(15, report.Items);
+                Assert.AreEqual(0, observedChecks);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    if (item.CheckCode == "PROJECT_IDENTITY")
+                        continue;
+
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status,
+                        $"Unexpected status: {item.CheckCode}");
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_InvalidDatabaseProjectId_ReportsFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string databasePath = Path.Combine(
+                    root, ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    root, ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        UPDATE HLAS_Project_Metadata
+                        SET ProjectId = $invalidId
+                        WHERE SingletonId = 1;
+                        """;
+
+                    command.Parameters.AddWithValue(
+                        "$invalidId", "not-a-valid-guid");
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        project.ProjectId,
+                        _ => observedChecks++);
+
+                Assert.HasCount(15, report.Items);
+                Assert.AreEqual(0, observedChecks);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    if (item.CheckCode == "PROJECT_IDENTITY")
+                        continue;
+
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status,
+                        $"Unexpected status: {item.CheckCode}");
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnreadableDatabase_RemainsNotCheckedWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string databasePath = Path.Combine(
+                    root, ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    root, ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                File.WriteAllText(
+                    databasePath,
+                    "This is not a SQLite database.");
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                string[] filesBefore =
+                    Directory.GetFiles(
+                        root, "*", SearchOption.AllDirectories)
+                    .OrderBy(x => x, StringComparer.Ordinal)
+                    .ToArray();
+
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        project.ProjectId,
+                        _ => observedChecks++);
+
+                Assert.HasCount(15, report.Items);
+                Assert.AreEqual(0, observedChecks);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status,
+                        $"Unexpected status: {item.CheckCode}");
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    filesBefore,
+                    Directory.GetFiles(
+                        root, "*", SearchOption.AllDirectories)
+                    .OrderBy(x => x, StringComparer.Ordinal)
+                    .ToArray());
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
         public void Build_ManifestDatabaseIdentityMismatch_ReportsIntegrityFailureWithoutWrites()
         {
             string root = NewRoot();
@@ -641,6 +1028,80 @@ namespace HLAS.Tests
             }
         }
         [TestMethod]
+        public void Build_MissingManifestProjectId_ReportsIntegrityFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string manifestPath = Path.Combine(
+                    root, ProjectPackageCreator.ManifestFileName);
+
+                string databasePath = Path.Combine(
+                    root, ProjectPackageCreator.DatabaseFileName);
+
+                System.Text.Json.Nodes.JsonNode manifest =
+                    System.Text.Json.Nodes.JsonNode.Parse(
+                        File.ReadAllText(manifestPath))!;
+
+                Assert.IsTrue(
+                    manifest.AsObject().Remove("ProjectId"));
+
+                File.WriteAllText(
+                    manifestPath, manifest.ToJsonString());
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        project.ProjectId,
+                        _ => observedChecks++);
+
+                Assert.HasCount(15, report.Items);
+                Assert.AreEqual(0, observedChecks);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    if (item.CheckCode == "PROJECT_IDENTITY")
+                        continue;
+
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status);
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
         public void Build_InvalidManifestProjectId_ReportsIntegrityFailureWithoutWrites()
         {
             string root = NewRoot();
@@ -684,6 +1145,161 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.IntegrityFailure,
                     GetItem(report, "PROJECT_IDENTITY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnsupportedManifestFormat_RemainsNotCheckedWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string manifestPath = Path.Combine(
+                    root, ProjectPackageCreator.ManifestFileName);
+
+                string databasePath = Path.Combine(
+                    root, ProjectPackageCreator.DatabaseFileName);
+
+                System.Text.Json.Nodes.JsonNode manifest =
+                    System.Text.Json.Nodes.JsonNode.Parse(
+                        File.ReadAllText(manifestPath))!;
+
+                manifest["ProjectFormatVersion"] =
+                    ProjectManifest.CurrentProjectFormatVersion + 1;
+
+                File.WriteAllText(
+                    manifestPath, manifest.ToJsonString());
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        project.ProjectId,
+                        _ => observedChecks++);
+
+                Assert.HasCount(15, report.Items);
+                Assert.AreEqual(0, observedChecks);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status,
+                        $"Unexpected status: {item.CheckCode}");
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnsupportedDatabaseSchema_RemainsNotCheckedWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string databasePath = Path.Combine(
+                    root, ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    root, ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        UPDATE HLAS_Project_Metadata
+                        SET DatabaseSchemaVersion = $version
+                        WHERE SingletonId = 1;
+                        """;
+
+                    command.Parameters.AddWithValue(
+                        "$version",
+                        ProjectDatabaseSchema.CurrentDatabaseSchemaVersion + 1);
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        project.ProjectId,
+                        _ => observedChecks++);
+
+                Assert.HasCount(15, report.Items);
+                Assert.AreEqual(0, observedChecks);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status,
+                        $"Unexpected status: {item.CheckCode}");
+                }
 
                 SqliteConnection.ClearAllPools();
 
@@ -1362,6 +1978,153 @@ namespace HLAS.Tests
                 CollectionAssert.AreEqual(
                     manifestBefore,
                     File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_InvalidManifestCreatedUtcValue_ReportsFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string manifestPath = Path.Combine(
+                    root, ProjectPackageCreator.ManifestFileName);
+
+                string databasePath = Path.Combine(
+                    root, ProjectPackageCreator.DatabaseFileName);
+
+                System.Text.Json.Nodes.JsonNode manifest =
+                    System.Text.Json.Nodes.JsonNode.Parse(
+                        File.ReadAllText(manifestPath))!;
+
+                manifest["CreatedUtc"] = "not-a-valid-date";
+
+                File.WriteAllText(
+                    manifestPath, manifest.ToJsonString());
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        project.ProjectId,
+                        _ => observedChecks++);
+
+                Assert.HasCount(15, report.Items);
+                Assert.AreEqual(0, observedChecks);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    if (item.CheckCode == "PROJECT_IDENTITY")
+                        continue;
+
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status);
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_MissingManifestCreatedUtc_ReportsIntegrityFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string manifestPath = Path.Combine(
+                    root, ProjectPackageCreator.ManifestFileName);
+
+                string databasePath = Path.Combine(
+                    root, ProjectPackageCreator.DatabaseFileName);
+
+                System.Text.Json.Nodes.JsonNode manifest =
+                    System.Text.Json.Nodes.JsonNode.Parse(
+                        File.ReadAllText(manifestPath))!;
+
+                Assert.IsTrue(
+                    manifest.AsObject().Remove("CreatedUtc"));
+
+                File.WriteAllText(
+                    manifestPath, manifest.ToJsonString());
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                int observedChecks = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        root,
+                        project.ProjectId,
+                        _ => observedChecks++);
+
+                Assert.HasCount(15, report.Items);
+                Assert.AreEqual(0, observedChecks);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                foreach (ProjectIntegrityCheckItem item in report.Items)
+                {
+                    if (item.CheckCode == "PROJECT_IDENTITY")
+                        continue;
+
+                    Assert.AreEqual(
+                        ProjectIntegrityCheckStatus.NotChecked,
+                        item.Status);
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
             }
             finally
             {
