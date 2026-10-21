@@ -2326,7 +2326,11 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.IntegrityFailure,
                     GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+                Assert.IsTrue(File.Exists(sourcePath));
 
+                Assert.AreEqual(
+                    "Developmental registered evidence.",
+                    File.ReadAllText(sourcePath));
                 SqliteConnection.ClearAllPools();
 
                 CollectionAssert.AreEqual(

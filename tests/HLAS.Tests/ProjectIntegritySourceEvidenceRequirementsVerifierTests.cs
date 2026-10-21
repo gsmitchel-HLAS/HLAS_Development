@@ -127,7 +127,156 @@ namespace HLAS.Tests
                 DeleteRoot(sample.Root);
             }
         }
+        [TestMethod]
+        public void Build_ReceivedRequirementWithFailedOperation_ReportsFailureWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
 
+            try
+            {
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        UPDATE HLAS_Governed_Operations
+                        SET Outcome = 'SAFE-STOP',
+                            Decision = 'REJECTED',
+                            Reason = 'Developmental regression test.'
+                        WHERE OperationId =
+                        (
+                            SELECT OperationId
+                            FROM HLAS_Source_Evidence_Requirement_Revisions
+                            ORDER BY RevisionNumber DESC
+                            LIMIT 1
+                        );
+                        """;
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] before =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[1].Status);
+                Assert.AreEqual(
+    ProjectIntegrityCheckStatus.Verified,
+    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[2].Status);
+                CollectionAssert.AreEqual(
+                    before,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_ReceivedRequirementWrongProjectOperation_ReportsFailureWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        UPDATE HLAS_Governed_Operations
+                        SET ProjectId = $otherProjectId
+                        WHERE OperationId =
+                        (
+                            SELECT OperationId
+                            FROM HLAS_Source_Evidence_Requirement_Revisions
+                            ORDER BY RevisionNumber DESC
+                            LIMIT 1
+                        );
+                        """;
+
+                    command.Parameters.AddWithValue(
+                        "$otherProjectId",
+                        Guid.NewGuid().ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] before =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[1].Status);
+                Assert.AreEqual(
+    ProjectIntegrityCheckStatus.Verified,
+    report.Items[2].Status);
+                CollectionAssert.AreEqual(
+                    before,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
         [TestMethod]
         public void Check_ReceivedEvidence_ReturnsVerifiedWithoutWrites()
         {
@@ -175,7 +324,24 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.IntegrityFailure,
                     result.Status);
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
 
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.IsFalse(
+                    File.Exists(sample.ControlledPath!));
                 CollectionAssert.AreEqual(
                     before,
                     ReadDatabaseBytes(sample.ProjectRoot));
@@ -284,6 +450,91 @@ namespace HLAS.Tests
             }
         }
         [TestMethod]
+        public void Build_ReceivedSourceLocked_RecoversWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                Assert.IsNotNull(sample.ControlledPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore = File.ReadAllBytes(databasePath);
+                byte[] manifestBefore = File.ReadAllBytes(manifestPath);
+                byte[] evidenceBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                ProjectIntegrityCheckReport lockedReport;
+
+                using (FileStream lockedFile = new(
+                    sample.ControlledPath!,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.None))
+                {
+                    lockedReport =
+                        ProjectIntegrityProjectReportBuilder.Build(
+                            sample.ProjectRoot,
+                            project.ProjectId);
+                }
+
+                Assert.HasCount(15, lockedReport.Items);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    lockedReport.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    lockedReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    lockedReport.Items[2].Status);
+
+                ProjectIntegrityCheckReport recoveredReport =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    recoveredReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    recoveredReport.Items[2].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore, File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore, File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    evidenceBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
         public void Build_ReceivedSource_PreservesVerifiedChecksWithoutWrites()
         {
             var sample = CreateProject("RECEIVED");
@@ -359,7 +610,26 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.NotChecked,
                     report.Items[14].Status);
+                File.WriteAllText(
+                    originalPath,
+                    "Modified original after governed intake.");
 
+                ProjectIntegrityCheckReport updatedReport =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    updatedReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    updatedReport.Items[2].Status);
+
+                Assert.AreEqual(
+                    "Modified original after governed intake.",
+                    File.ReadAllText(originalPath));
                 SqliteConnection.ClearAllPools();
 
                 CollectionAssert.AreEqual(
