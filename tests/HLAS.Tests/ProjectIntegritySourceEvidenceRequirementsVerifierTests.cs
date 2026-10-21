@@ -278,6 +278,794 @@ namespace HLAS.Tests
             }
         }
         [TestMethod]
+        public void Build_UnrelatedLockedEvidence_PreservesNotRequiredDecision()
+        {
+            var sample = CreateProject("NOT_REQUIRED");
+
+            try
+            {
+                string original = Path.Combine(
+                    sample.Root, "UnrelatedNotRequiredLocked.txt");
+
+                File.WriteAllText(
+                    original, "Unrelated developmental evidence.");
+
+                EvidenceCustodyRecord second =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        sample.ProjectRoot, original);
+
+                string controlled = Path.Combine(
+                    sample.ProjectRoot, second.RelativeCustodyPath);
+
+                byte[] controlledBefore =
+                    File.ReadAllBytes(controlled);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport lockedReport;
+
+                using (FileStream fileLock = new(
+                    controlled,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.None))
+                {
+                    lockedReport =
+                        ProjectIntegrityProjectReportBuilder.Build(
+                            sample.ProjectRoot, project.ProjectId);
+                }
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    lockedReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    lockedReport.Items[2].Status);
+
+                ProjectIntegrityCheckReport unlockedReport =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    unlockedReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    unlockedReport.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    unlockedReport.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    controlledBefore,
+                    File.ReadAllBytes(controlled));
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnrelatedTamperedEvidence_PreservesNotRequiredDecision()
+        {
+            var sample = CreateProject("NOT_REQUIRED");
+
+            try
+            {
+                string original = Path.Combine(
+                    sample.Root, "UnrelatedNotRequiredTampered.txt");
+
+                File.WriteAllText(
+                    original, "Unrelated developmental evidence.");
+
+                EvidenceCustodyRecord second =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        sample.ProjectRoot, original);
+
+                string controlled = Path.Combine(
+                    sample.ProjectRoot, second.RelativeCustodyPath);
+
+                Assert.IsTrue(File.Exists(controlled));
+
+                File.AppendAllText(
+                    controlled, " Tampered after custody.");
+
+                byte[] controlledBefore =
+                    File.ReadAllBytes(controlled);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                string[] filesBefore = Directory.GetFiles(
+                    sample.ProjectRoot, "*",
+                    SearchOption.AllDirectories);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    controlledBefore,
+                    File.ReadAllBytes(controlled));
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEquivalent(
+                    filesBefore,
+                    Directory.GetFiles(
+                        sample.ProjectRoot, "*",
+                        SearchOption.AllDirectories));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnrelatedMissingEvidence_PreservesNotRequiredDecision()
+        {
+            var sample = CreateProject("NOT_REQUIRED");
+
+            try
+            {
+                string original = Path.Combine(
+                    sample.Root, "UnrelatedNotRequired.txt");
+
+                File.WriteAllText(original, "Unrelated evidence.");
+
+                EvidenceCustodyRecord second =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        sample.ProjectRoot, original);
+
+                string controlled = Path.Combine(
+                    sample.ProjectRoot, second.RelativeCustodyPath);
+
+                Assert.IsTrue(File.Exists(controlled));
+                File.Delete(controlled);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                string[] filesBefore = Directory.GetFiles(
+                    sample.ProjectRoot, "*",
+                    SearchOption.AllDirectories);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEquivalent(
+                    filesBefore,
+                    Directory.GetFiles(
+                        sample.ProjectRoot, "*",
+                        SearchOption.AllDirectories));
+
+                Assert.IsFalse(File.Exists(controlled));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnrelatedLockedEvidence_PreservesPendingRequirement()
+        {
+            var sample = CreateProject("PENDING");
+
+            try
+            {
+                string original = Path.Combine(
+                    sample.Root, "UnrelatedPendingLocked.txt");
+
+                File.WriteAllText(
+                    original, "Unrelated developmental evidence.");
+
+                EvidenceCustodyRecord second =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        sample.ProjectRoot, original);
+
+                string controlled = Path.Combine(
+                    sample.ProjectRoot, second.RelativeCustodyPath);
+
+                byte[] controlledBefore =
+                    File.ReadAllBytes(controlled);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport lockedReport;
+
+                using (FileStream fileLock = new(
+                    controlled,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.None))
+                {
+                    lockedReport =
+                        ProjectIntegrityProjectReportBuilder.Build(
+                            sample.ProjectRoot, project.ProjectId);
+                }
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    lockedReport.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    lockedReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    lockedReport.Items[2].Status);
+
+                ProjectIntegrityCheckReport unlockedReport =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    unlockedReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    unlockedReport.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    unlockedReport.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    controlledBefore,
+                    File.ReadAllBytes(controlled));
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnrelatedTamperedEvidence_PreservesPendingRequirement()
+        {
+            var sample = CreateProject("PENDING");
+
+            try
+            {
+                string original = Path.Combine(
+                    sample.Root, "UnrelatedPendingTampered.txt");
+
+                File.WriteAllText(
+                    original, "Unrelated developmental evidence.");
+
+                EvidenceCustodyRecord second =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        sample.ProjectRoot, original);
+
+                string controlled = Path.Combine(
+                    sample.ProjectRoot, second.RelativeCustodyPath);
+
+                Assert.IsTrue(File.Exists(controlled));
+
+                File.AppendAllText(
+                    controlled, " Tampered after custody.");
+
+                byte[] controlledBefore =
+                    File.ReadAllBytes(controlled);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                string[] filesBefore = Directory.GetFiles(
+                    sample.ProjectRoot, "*",
+                    SearchOption.AllDirectories);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    controlledBefore,
+                    File.ReadAllBytes(controlled));
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEquivalent(
+                    filesBefore,
+                    Directory.GetFiles(
+                        sample.ProjectRoot, "*",
+                        SearchOption.AllDirectories));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnrelatedMissingEvidence_PreservesPendingRequirement()
+        {
+            var sample = CreateProject("PENDING");
+
+            try
+            {
+                string original = Path.Combine(
+                    sample.Root, "UnrelatedPendingSource.txt");
+
+                File.WriteAllText(
+                    original, "Unrelated developmental evidence.");
+
+                EvidenceCustodyRecord second =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        sample.ProjectRoot, original);
+
+                string controlled = Path.Combine(
+                    sample.ProjectRoot,
+                    second.RelativeCustodyPath);
+
+                Assert.IsTrue(File.Exists(controlled));
+                File.Delete(controlled);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                string[] filesBefore = Directory.GetFiles(
+                    sample.ProjectRoot, "*",
+                    SearchOption.AllDirectories);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEquivalent(
+                    filesBefore,
+                    Directory.GetFiles(
+                        sample.ProjectRoot, "*",
+                        SearchOption.AllDirectories));
+
+                Assert.IsFalse(File.Exists(controlled));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnrelatedLockedEvidence_PreservesIndependentResults()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                string original = Path.Combine(
+                    sample.Root, "UnrelatedLocked.txt");
+
+                File.WriteAllText(original, "Unrelated evidence.");
+
+                EvidenceCustodyRecord second =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        sample.ProjectRoot, original);
+
+                string controlled = Path.Combine(
+                    sample.ProjectRoot, second.RelativeCustodyPath);
+
+                byte[] requiredBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                byte[] secondBefore = File.ReadAllBytes(controlled);
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore = File.ReadAllBytes(manifestPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport lockedReport;
+
+                using (FileStream fileLock = new(
+                    controlled,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.None))
+                {
+                    lockedReport =
+                        ProjectIntegrityProjectReportBuilder.Build(
+                            sample.ProjectRoot, project.ProjectId);
+                }
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    lockedReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    lockedReport.Items[2].Status);
+
+                ProjectIntegrityCheckReport unlockedReport =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    unlockedReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    unlockedReport.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    unlockedReport.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    requiredBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+
+                CollectionAssert.AreEqual(
+                    secondBefore,
+                    File.ReadAllBytes(controlled));
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnrelatedTamperedEvidence_PreservesIndependentResults()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                string secondOriginal = Path.Combine(
+                    sample.Root, "UnrelatedTamperSource.txt");
+
+                File.WriteAllText(
+                    secondOriginal,
+                    "Different developmental evidence.");
+
+                EvidenceCustodyRecord second =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        sample.ProjectRoot, secondOriginal);
+
+                string secondControlled = Path.Combine(
+                    sample.ProjectRoot, second.RelativeCustodyPath);
+
+                Assert.IsTrue(File.Exists(secondControlled));
+
+                File.AppendAllText(
+                    secondControlled, " Tampered after custody.");
+
+                byte[] tamperedBefore =
+                    File.ReadAllBytes(secondControlled);
+
+                byte[] requiredBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    tamperedBefore,
+                    File.ReadAllBytes(secondControlled));
+
+                CollectionAssert.AreEqual(
+                    requiredBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnrelatedMissingEvidence_PreservesIndependentResults()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                string secondOriginal = Path.Combine(
+                    sample.Root, "UnrelatedSource.txt");
+
+                File.WriteAllText(
+                    secondOriginal, "Different developmental evidence.");
+
+                EvidenceCustodyRecord second =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        sample.ProjectRoot, secondOriginal);
+
+                string missingControlled = Path.Combine(
+                    sample.ProjectRoot, second.RelativeCustodyPath);
+
+                Assert.IsTrue(File.Exists(missingControlled));
+                File.Delete(missingControlled);
+
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] requiredBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                string[] filesBefore = Directory.GetFiles(
+                    sample.ProjectRoot, "*", SearchOption.AllDirectories);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    requiredBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+
+                CollectionAssert.AreEquivalent(
+                    filesBefore,
+                    Directory.GetFiles(
+                        sample.ProjectRoot, "*",
+                        SearchOption.AllDirectories));
+
+                Assert.IsFalse(File.Exists(missingControlled));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
         public void Check_ReceivedEvidence_ReturnsVerifiedWithoutWrites()
         {
             var sample = CreateProject("RECEIVED");
