@@ -3164,7 +3164,40 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.NotChecked,
                     report.Items[14].Status);
+                ProjectIntegrityCheckReport lockedReport;
 
+                using (FileStream lockedFile = new(
+                    sample.ControlledPath!,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.None))
+                {
+                    lockedReport =
+                        ProjectIntegrityProjectReportBuilder.Build(
+                            sample.ProjectRoot,
+                            project.ProjectId);
+                }
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    lockedReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    lockedReport.Items[2].Status);
+
+                ProjectIntegrityCheckReport unlockedReport =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    unlockedReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    unlockedReport.Items[2].Status);
                 CollectionAssert.AreEqual(
                     databaseBefore,
                     ReadDatabaseBytes(sample.ProjectRoot));
@@ -3385,6 +3418,130 @@ namespace HLAS.Tests
                     Directory.GetFiles(
                         sample.ProjectRoot, "*",
                         SearchOption.AllDirectories));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_NoRequirementRevision_RegisteredCustodyRemainsVerifiedWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                Assert.IsNotNull(sample.ControlledPath);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = Path.Combine(
+                        sample.ProjectRoot,
+                        ProjectPackageCreator.DatabaseFileName),
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        DELETE FROM HLAS_Source_Evidence_Requirement_Items;
+                        DELETE FROM HLAS_Source_Evidence_Requirement_Revisions;
+                        """;
+
+                    command.ExecuteNonQuery();
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] evidenceBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    evidenceBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+                File.Delete(sample.ControlledPath!);
+
+                string[] filesBeforeCheck = Directory.GetFiles(
+                    sample.ProjectRoot, "*",
+                    SearchOption.AllDirectories);
+
+                ProjectIntegrityCheckReport missingReport =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    missingReport.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    missingReport.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    missingReport.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEquivalent(
+                    filesBeforeCheck,
+                    Directory.GetFiles(
+                        sample.ProjectRoot, "*",
+                        SearchOption.AllDirectories));
+
+                Assert.IsFalse(
+                    File.Exists(sample.ControlledPath!));
             }
             finally
             {
