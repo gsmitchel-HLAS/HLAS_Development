@@ -202,6 +202,402 @@ namespace HLAS.Tests
             }
         }
         [TestMethod]
+        public void Build_EmptyReceivedEvidenceId_PreservesCustodyWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using (SqliteCommand pragma =
+                        connection.CreateCommand())
+                    {
+                        pragma.CommandText =
+                            "PRAGMA foreign_keys = OFF;";
+                        pragma.ExecuteNonQuery();
+                    }
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Source_Evidence_Requirement_Items
+                SET EvidenceId = $evidenceId
+                WHERE RequirementState = 'RECEIVED';
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$evidenceId",
+                        Guid.Empty.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] controlledBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    controlledBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_UnregisteredReceivedEvidenceId_PreservesCustodyWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using (SqliteCommand pragma =
+                        connection.CreateCommand())
+                    {
+                        pragma.CommandText =
+                            "PRAGMA foreign_keys = OFF;";
+                        pragma.ExecuteNonQuery();
+                    }
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Source_Evidence_Requirement_Items
+                SET EvidenceId = $evidenceId
+                WHERE RequirementState = 'RECEIVED';
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$evidenceId",
+                        Guid.NewGuid().ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] controlledBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    controlledBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_InvalidReceivedEvidenceId_PreservesCustodyWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using (SqliteCommand pragma =
+                        connection.CreateCommand())
+                    {
+                        pragma.CommandText =
+                            "PRAGMA foreign_keys = OFF;";
+                        pragma.ExecuteNonQuery();
+                    }
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Source_Evidence_Requirement_Items
+                SET EvidenceId = 'NOT_A_VALID_GUID'
+                WHERE RequirementState = 'RECEIVED';
+                """;
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] controlledBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    controlledBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_ReceivedWithoutEvidenceId_PreservesCustodyWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using (SqliteCommand pragma =
+                        connection.CreateCommand())
+                    {
+                        pragma.CommandText =
+                            "PRAGMA ignore_check_constraints = ON;";
+                        pragma.ExecuteNonQuery();
+                    }
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Source_Evidence_Requirement_Items
+                SET EvidenceId = NULL
+                WHERE RequirementState = 'RECEIVED';
+                """;
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] controlledBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    controlledBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
         public void Build_BlankRequirementState_PreservesCustodyWithoutWrites()
         {
             var sample = CreateProject("RECEIVED");
