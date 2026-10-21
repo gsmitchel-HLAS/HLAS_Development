@@ -3087,6 +3087,310 @@ namespace HLAS.Tests
                 DeleteRoot(sample.Root);
             }
         }
+        [TestMethod]
+        public void Build_EmptyLatestRequirementRevision_PreservesCustodyWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                Assert.IsNotNull(sample.ControlledPath);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = Path.Combine(
+                        sample.ProjectRoot,
+                        ProjectPackageCreator.DatabaseFileName),
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        DELETE FROM HLAS_Source_Evidence_Requirement_Items
+                        WHERE RequirementRevisionId =
+                        (
+                            SELECT RequirementRevisionId
+                            FROM HLAS_Source_Evidence_Requirement_Revisions
+                            ORDER BY RevisionNumber DESC
+                            LIMIT 1
+                        );
+                        """;
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] evidenceBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    report.Items[1].Status);
+
+                StringAssert.Contains(
+                    report.Items[1].Detail,
+                    "no requirement items");
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    evidenceBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_EmptyLatestRevision_MissingCustodyPreservesIndependentResults()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                Assert.IsNotNull(sample.ControlledPath);
+
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        DELETE FROM HLAS_Source_Evidence_Requirement_Items
+                        WHERE RequirementRevisionId =
+                        (
+                            SELECT RequirementRevisionId
+                            FROM HLAS_Source_Evidence_Requirement_Revisions
+                            ORDER BY RevisionNumber DESC
+                            LIMIT 1
+                        );
+                        """;
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                File.Delete(sample.ControlledPath!);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                string[] filesBefore = Directory.GetFiles(
+                    sample.ProjectRoot, "*",
+                    SearchOption.AllDirectories);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEquivalent(
+                    filesBefore,
+                    Directory.GetFiles(
+                        sample.ProjectRoot, "*",
+                        SearchOption.AllDirectories));
+
+                Assert.IsFalse(File.Exists(sample.ControlledPath!));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_EmptyLatestRevision_TamperedCustodyPreservesIndependentResults()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                Assert.IsNotNull(sample.ControlledPath);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = Path.Combine(
+                        sample.ProjectRoot,
+                        ProjectPackageCreator.DatabaseFileName),
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        DELETE FROM HLAS_Source_Evidence_Requirement_Items
+                        WHERE RequirementRevisionId =
+                        (
+                            SELECT RequirementRevisionId
+                            FROM HLAS_Source_Evidence_Requirement_Revisions
+                            ORDER BY RevisionNumber DESC
+                            LIMIT 1
+                        );
+                        """;
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                File.AppendAllText(
+                    sample.ControlledPath!,
+                    " Intentional developmental tampering.");
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] evidenceBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                string[] filesBefore = Directory.GetFiles(
+                    sample.ProjectRoot, "*",
+                    SearchOption.AllDirectories);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    report.Items[1].Status);
+
+                StringAssert.Contains(
+                    report.Items[1].Detail,
+                    "no requirement items");
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    evidenceBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
+
+                CollectionAssert.AreEquivalent(
+                    filesBefore,
+                    Directory.GetFiles(
+                        sample.ProjectRoot, "*",
+                        SearchOption.AllDirectories));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
         private static (
             string Root,
             string ProjectRoot,
