@@ -291,7 +291,12 @@ namespace HLAS.Tests
             try
             {
                 Assert.IsNotNull(sample.ControlledPath);
+                string originalPath =
+                   Path.Combine(sample.Root, "Source.txt");
 
+                Assert.IsTrue(File.Exists(originalPath));
+                File.Delete(originalPath);
+                Assert.IsFalse(File.Exists(originalPath));
                 ProjectManifest project =
                     ProjectPackageReader.Open(sample.ProjectRoot);
 
