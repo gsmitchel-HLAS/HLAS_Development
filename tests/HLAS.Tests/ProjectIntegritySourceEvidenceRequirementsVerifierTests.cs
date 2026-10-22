@@ -2493,7 +2493,25 @@ namespace HLAS.Tests
                 StringAssert.Contains(
                     result.Detail,
                     "superseded");
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
 
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
                 CollectionAssert.AreEqual(
                     before,
                     ReadDatabaseBytes(sample.ProjectRoot));
@@ -3542,6 +3560,106 @@ namespace HLAS.Tests
 
                 Assert.IsFalse(
                     File.Exists(sample.ControlledPath!));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
+        [TestMethod]
+        public void Build_BlankRequirementKey_PreservesIndependentCustodyWithoutWrites()
+        {
+            var sample = CreateProject("RECEIVED");
+
+            try
+            {
+                Assert.IsNotNull(sample.ControlledPath);
+
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using (SqliteCommand pragma =
+                        connection.CreateCommand())
+                    {
+                        pragma.CommandText =
+                            "PRAGMA ignore_check_constraints = ON;";
+                        pragma.ExecuteNonQuery();
+                    }
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        UPDATE HLAS_Source_Evidence_Requirement_Items
+                        SET RequirementKey = '   '
+                        WHERE RequirementKey = 'DEVELOPMENTAL_SOURCE';
+                        """;
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                byte[] evidenceBefore =
+                    File.ReadAllBytes(sample.ControlledPath!);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[1].Status);
+
+                StringAssert.Contains(
+                    report.Items[1].Detail,
+                    "no valid key");
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                CollectionAssert.AreEqual(
+                    evidenceBefore,
+                    File.ReadAllBytes(sample.ControlledPath!));
             }
             finally
             {
