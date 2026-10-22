@@ -3243,6 +3243,112 @@ namespace HLAS.Tests
                 DeleteRoot(root);
             }
         }
+        [TestMethod]
+        public void Build_EvidenceChangesBetweenVerifiers_PreservesSeparateResults()
+        {
+            string root = NewRoot();
+            string projectRoot = Path.Combine(root, "Project");
+
+            try
+            {
+                Directory.CreateDirectory(root);
+
+                string sourcePath =
+                    Path.Combine(root, "Source.txt");
+
+                File.WriteAllText(
+                    sourcePath,
+                    "Developmental cross-verifier evidence.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot, sourcePath);
+
+                string controlledPath = Path.Combine(
+                    projectRoot, evidence.RelativeCustodyPath);
+
+                string databasePath = Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                string manifestPath = Path.Combine(
+                    projectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                int changes = 0;
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.BuildWithTestObserver(
+                        projectRoot,
+                        project.ProjectId,
+                        checkCode =>
+                        {
+                            if (checkCode == "SOURCE_EVIDENCE_REQUIREMENTS")
+                            {
+                                byte[] changed =
+                                    File.ReadAllBytes(controlledPath);
+
+                                Assert.IsNotEmpty(changed);
+
+                                changed[0] ^= 1;
+
+                                File.WriteAllBytes(
+                                    controlledPath, changed);
+
+                                changes++;
+                            }
+                        });
+
+                Assert.AreEqual(1, changes);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    GetItem(report, "LINEAGE_STRUCTURE").Status);
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+
+                Assert.AreEqual(
+                    "Developmental cross-verifier evidence.",
+                    File.ReadAllText(sourcePath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
         private static ProjectIntegrityCheckItem GetItem(
             ProjectIntegrityCheckReport report,
             string checkCode)
