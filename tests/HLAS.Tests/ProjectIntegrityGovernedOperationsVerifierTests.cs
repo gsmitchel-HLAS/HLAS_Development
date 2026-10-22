@@ -363,6 +363,131 @@ namespace HLAS.Tests
                 DeleteRoot(root);
             }
         }
+        [TestMethod]
+        public void Build_CompletedAndOpenOperations_ReportPendingWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(root);
+
+                GovernedOperationRecord completed =
+                    BeginOperation(root);
+
+                GovernedOperationService.FinalizeSuccess(
+                    root,
+                    completed.OperationId);
+
+                BeginOperation(root);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(root);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    report.Items[4].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(root));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_SafeStopAndOpenOperation_ReportPendingWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(root);
+
+                GovernedOperationRecord stopped =
+                    BeginOperation(root);
+
+                GovernedOperationService.FinalizeSafeStop(
+                    root,
+                    stopped.OperationId,
+                    new DecisionRecord(
+                        "SAFE-STOP",
+                        "Developmental prerequisite was not met."));
+
+                BeginOperation(root);
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(root);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    report.Items[4].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(root));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
         private static GovernedOperationRecord BeginOperation(
             string root)
         {
