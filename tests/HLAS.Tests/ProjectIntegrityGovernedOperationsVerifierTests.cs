@@ -488,6 +488,175 @@ namespace HLAS.Tests
                 DeleteRoot(root);
             }
         }
+        [TestMethod]
+        public void Build_OpenOperationWithOutcome_ReportsFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(root);
+
+                GovernedOperationRecord operation =
+                    BeginOperation(root);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = DatabasePath(root),
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using (SqliteCommand pragma =
+                        connection.CreateCommand())
+                    {
+                        pragma.CommandText =
+                            "PRAGMA ignore_check_constraints = ON;";
+                        pragma.ExecuteNonQuery();
+                    }
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        UPDATE HLAS_Governed_Operations
+                        SET Outcome = 'SUCCESS'
+                        WHERE OperationId = $operationId;
+                        """;
+
+                    command.Parameters.AddWithValue(
+                        "$operationId",
+                        operation.OperationId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(root);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[4].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(root));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_OpenOperationWithDecision_ReportsFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(root);
+
+                GovernedOperationRecord operation =
+                    BeginOperation(root);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = DatabasePath(root),
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using (SqliteCommand pragma =
+                        connection.CreateCommand())
+                    {
+                        pragma.CommandText =
+                            "PRAGMA ignore_check_constraints = ON;";
+                        pragma.ExecuteNonQuery();
+                    }
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        UPDATE HLAS_Governed_Operations
+                        SET Decision = 'SAFE-STOP'
+                        WHERE OperationId = $operationId;
+                        """;
+
+                    command.Parameters.AddWithValue(
+                        "$operationId",
+                        operation.OperationId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(root);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[4].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(root));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
         private static GovernedOperationRecord BeginOperation(
             string root)
         {
