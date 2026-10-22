@@ -207,7 +207,162 @@ namespace HLAS.Tests
                 DeleteRoot(root);
             }
         }
+        [TestMethod]
+        public void Build_CompletionBeforeStart_ReportsFailureWithoutWrites()
+        {
+            string root = NewRoot();
 
+            try
+            {
+                ProjectPackageCreator.CreateNew(root);
+
+                GovernedOperationRecord operation =
+                    BeginOperation(root);
+
+                GovernedOperationService.FinalizeSuccess(
+                    root,
+                    operation.OperationId);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = DatabasePath(root),
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        UPDATE HLAS_Governed_Operations
+                        SET CompletedUtc = $completedUtc
+                        WHERE OperationId = $operationId;
+                        """;
+
+                    command.Parameters.AddWithValue(
+                        "$completedUtc",
+                        DateTimeOffset.MinValue.ToString("O"));
+
+                    command.Parameters.AddWithValue(
+                        "$operationId",
+                        operation.OperationId.Value.ToString("D"));
+
+                    Assert.AreEqual(
+                        1,
+                        command.ExecuteNonQuery());
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(root);
+
+                ProjectManifest manifest =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        manifest.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[4].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(root));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+        [TestMethod]
+        public void Build_InvalidStartTime_ReportsFailureWithoutWrites()
+        {
+            string root = NewRoot();
+
+            try
+            {
+                ProjectPackageCreator.CreateNew(root);
+
+                GovernedOperationRecord operation =
+                    BeginOperation(root);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = DatabasePath(root),
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                        UPDATE HLAS_Governed_Operations
+                        SET StartedUtc = 'NOT_A_TIMESTAMP'
+                        WHERE OperationId = $operationId;
+                        """;
+
+                    command.Parameters.AddWithValue(
+                        "$operationId",
+                        operation.OperationId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(root);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[0].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[4].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(root));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
         private static GovernedOperationRecord BeginOperation(
             string root)
         {
