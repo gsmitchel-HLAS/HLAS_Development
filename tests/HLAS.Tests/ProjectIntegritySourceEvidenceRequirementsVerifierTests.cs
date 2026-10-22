@@ -3666,6 +3666,164 @@ namespace HLAS.Tests
                 DeleteRoot(sample.Root);
             }
         }
+        [TestMethod]
+        public void Build_MultipleHistoricalRevisions_IdentifiesEmptyRevisionWithoutWrites()
+        {
+            var sample = CreateProject("PENDING");
+
+            try
+            {
+                string databasePath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    string operation2 = Guid.NewGuid().ToString("D");
+                    string operation3 = Guid.NewGuid().ToString("D");
+                    string revision2 = Guid.NewGuid().ToString("D");
+                    string revision3 = Guid.NewGuid().ToString("D");
+
+                    string time2 =
+                        DateTimeOffset.UtcNow.AddSeconds(1).ToString("O");
+
+                    string time3 =
+                        DateTimeOffset.UtcNow.AddSeconds(2).ToString("O");
+
+                    ProjectManifest project =
+                        ProjectPackageReader.Open(sample.ProjectRoot);
+
+                    using SqliteTransaction transaction =
+                        connection.BeginTransaction();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.Transaction = transaction;
+
+                    command.CommandText =
+                        """
+                        INSERT INTO HLAS_Governed_Operations
+                        (OperationId, ProjectId, UserId, SeriesId,
+                         ProjectRole, StartedUtc, CompletedUtc, Outcome)
+                        VALUES
+                        ($operation2, $projectId, $user2, 'V',
+                         'Admin', $time2, $time2, 'SUCCESS'),
+                        ($operation3, $projectId, $user3, 'V',
+                         'Admin', $time3, $time3, 'SUCCESS');
+
+                        INSERT INTO HLAS_Source_Evidence_Requirement_Revisions
+                        (RequirementRevisionId, RevisionNumber,
+                         PriorRequirementRevisionId, OperationId, ApprovedUtc)
+                        SELECT $revision2, 2, RequirementRevisionId,
+                               $operation2, $time2
+                        FROM HLAS_Source_Evidence_Requirement_Revisions
+                        WHERE RevisionNumber = 1;
+
+                        INSERT INTO HLAS_Source_Evidence_Requirement_Revisions
+                        (RequirementRevisionId, RevisionNumber,
+                         PriorRequirementRevisionId, OperationId, ApprovedUtc)
+                        SELECT $revision3, 3, RequirementRevisionId,
+                               $operation3, $time3
+                        FROM HLAS_Source_Evidence_Requirement_Revisions
+                        WHERE RevisionNumber = 2;
+
+                        INSERT INTO HLAS_Source_Evidence_Requirement_Items
+                        (RequirementRevisionId, RequirementKey,
+                         RequirementState, EvidenceId, NotRequiredReason)
+                        VALUES
+                        ($revision3, 'DEVELOPMENTAL_SOURCE',
+                         'NOT_REQUIRED', NULL, 'Developmental exception.');
+                        """;
+
+                    command.Parameters.AddWithValue(
+                        "$operation2", operation2);
+                    command.Parameters.AddWithValue(
+                        "$operation3", operation3);
+                    command.Parameters.AddWithValue(
+                        "$revision2", revision2);
+                    command.Parameters.AddWithValue(
+                        "$revision3", revision3);
+                    command.Parameters.AddWithValue(
+                        "$projectId", project.ProjectId.Value.ToString("D"));
+                    command.Parameters.AddWithValue(
+                        "$user2", Guid.NewGuid().ToString("D"));
+                    command.Parameters.AddWithValue(
+                        "$user3", Guid.NewGuid().ToString("D"));
+                    command.Parameters.AddWithValue("$time2", time2);
+                    command.Parameters.AddWithValue("$time3", time3);
+
+                    command.ExecuteNonQuery();
+                    transaction.Commit();
+                }
+
+                byte[] databaseBefore =
+                    ReadDatabaseBytes(sample.ProjectRoot);
+
+                string manifestPath = Path.Combine(
+                    sample.ProjectRoot,
+                    ProjectPackageCreator.ManifestFileName);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                ProjectManifest current =
+                    ProjectPackageReader.Open(sample.ProjectRoot);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        sample.ProjectRoot,
+                        current.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[1].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[3].Status);
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[2].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[4].Status);
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[12].Status);
+
+                StringAssert.Contains(
+                    report.Items[12].Detail,
+                    "Historical requirement revisions without recorded items: 2.");
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    ReadDatabaseBytes(sample.ProjectRoot));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteRoot(sample.Root);
+            }
+        }
         private static (
             string Root,
             string ProjectRoot,

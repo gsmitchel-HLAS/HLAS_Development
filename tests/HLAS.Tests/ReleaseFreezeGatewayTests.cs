@@ -2604,6 +2604,54 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.IntegrityFailure,
                     result.Status);
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    "HISTORICAL_CHECKPOINT_COVERAGE",
+                    report.Items[11].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                Assert.IsFalse(
+                    File.Exists(
+                        Path.Combine(
+                            root,
+                            checkpoint.ManifestRelativePath)));
             }
             finally
             {
