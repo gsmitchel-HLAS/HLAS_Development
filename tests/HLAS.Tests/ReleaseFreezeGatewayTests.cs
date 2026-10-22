@@ -2658,7 +2658,651 @@ namespace HLAS.Tests
                 DeleteTemporaryProjectRoot(root);
             }
         }
+        [TestMethod]
+        public void ProjectIntegrityReleaseFreeze_SuccessWithoutCheckpoint_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
 
+            try
+            {
+                var request = CreateIntegrityReleaseRequest(root);
+
+                _ = ReleaseFreezeGateway.CreateReleaseFreeze(
+                    root,
+                    request.UserId,
+                    ProjectRole.Admin,
+                    request.Release.ReleaseId);
+
+                using (SqliteConnection connection = OpenDatabase(root))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                DELETE FROM HLAS_Historical_Checkpoints
+                WHERE ReleaseId = $releaseId
+                  AND CheckpointType = 'RELEASE_FREEZE';
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$releaseId",
+                        request.Release.ReleaseId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+                byte[] before = File.ReadAllBytes(databasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[9].Status);
+
+                StringAssert.Contains(
+                    report.Items[9].Detail,
+                    "no linked RELEASE_FREEZE Historical Checkpoint");
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    before,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReleaseFreeze_CompletedAndPendingReleases_ReportPendingWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                var request = CreateIntegrityReleaseRequest(root);
+
+                _ = ReleaseFreezeGateway.CreateReleaseFreeze(
+                    root,
+                    request.UserId,
+                    ProjectRole.Admin,
+                    request.Release.ReleaseId);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ReadinessCheckId secondReadiness =
+                    CreateReadinessCheck(
+                        root,
+                        project.ProjectId,
+                        request.UserId);
+
+                _ = ReleaseGateway.RequestRelease(
+                    root,
+                    request.UserId,
+                    ProjectRole.Admin,
+                    secondReadiness);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+                byte[] before = File.ReadAllBytes(databasePath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    "HISTORICAL_CHECKPOINT_COVERAGE",
+                    report.Items[11].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    before,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReleaseFreeze_TamperedManifest_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                var request = CreateIntegrityReleaseRequest(root);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        root,
+                        request.UserId,
+                        ProjectRole.Admin,
+                        request.Release.ReleaseId);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    checkpoint.ManifestRelativePath);
+
+                File.AppendAllText(
+                    manifestPath,
+                    Environment.NewLine);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    "HISTORICAL_CHECKPOINT_COVERAGE",
+                    report.Items[11].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    report.Items[14].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReleaseFreeze_TamperedCompletedAndPending_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                var request = CreateIntegrityReleaseRequest(root);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        root,
+                        request.UserId,
+                        ProjectRole.Admin,
+                        request.Release.ReleaseId);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ReadinessCheckId secondReadiness =
+                    CreateReadinessCheck(
+                        root,
+                        project.ProjectId,
+                        request.UserId);
+
+                _ = ReleaseGateway.RequestRelease(
+                    root,
+                    request.UserId,
+                    ProjectRole.Admin,
+                    secondReadiness);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    checkpoint.ManifestRelativePath);
+
+                File.AppendAllText(
+                    manifestPath,
+                    Environment.NewLine);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    "HISTORICAL_CHECKPOINT_COVERAGE",
+                    report.Items[11].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReleaseFreeze_TamperedControlledEvidence_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string sourcePath = Path.Combine(
+                    root,
+                    "release-integrity-source.txt");
+
+                File.WriteAllText(
+                    sourcePath,
+                    "Original developmental evidence.");
+
+                EvidenceCustodyRecord evidence =
+                    EvidenceCustodyService.Accept(root, sourcePath);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        root,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        root,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                _ = ReleaseFreezeGateway.CreateReleaseFreeze(
+                    root,
+                    userId,
+                    ProjectRole.Admin,
+                    release.ReleaseId);
+
+                string controlledPath = Path.Combine(
+                    root,
+                    evidence.RelativeCustodyPath);
+
+                File.AppendAllText(
+                    controlledPath,
+                    "Tampered after release.");
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] evidenceBefore =
+                    File.ReadAllBytes(controlledPath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    evidenceBefore,
+                    File.ReadAllBytes(controlledPath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReleaseFreeze_MissingControlledEvidence_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(root);
+
+                string sourcePath = Path.Combine(
+                    root,
+                    "release-missing-evidence.txt");
+
+                File.WriteAllText(
+                    sourcePath,
+                    "Original developmental evidence.");
+
+                EvidenceCustodyRecord evidence =
+                    EvidenceCustodyService.Accept(root, sourcePath);
+
+                UserId userId = UserId.CreateNew();
+
+                ReadinessCheckId readinessId =
+                    CreateReadinessCheck(
+                        root,
+                        project.ProjectId,
+                        userId);
+
+                ReleaseRecord release =
+                    ReleaseGateway.RequestRelease(
+                        root,
+                        userId,
+                        ProjectRole.Admin,
+                        readinessId);
+
+                _ = ReleaseFreezeGateway.CreateReleaseFreeze(
+                    root,
+                    userId,
+                    ProjectRole.Admin,
+                    release.ReleaseId);
+
+                string controlledPath = Path.Combine(
+                    root,
+                    evidence.RelativeCustodyPath);
+
+                File.Delete(controlledPath);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    "HISTORICAL_CHECKPOINT_COVERAGE",
+                    report.Items[11].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                Assert.IsFalse(File.Exists(controlledPath));
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReleaseFreeze_MissingFrozenDatabase_ReportsFailureWithoutRecreatingFile()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                var request = CreateIntegrityReleaseRequest(root);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        root,
+                        request.UserId,
+                        ProjectRole.Admin,
+                        request.Release.ReleaseId);
+
+                string frozenDatabasePath = Path.Combine(
+                    root,
+                    checkpoint.RelativeCheckpointPath,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                File.Delete(frozenDatabasePath);
+
+                Assert.IsFalse(File.Exists(frozenDatabasePath));
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    "HISTORICAL_CHECKPOINT_COVERAGE",
+                    report.Items[11].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                Assert.IsFalse(File.Exists(frozenDatabasePath));
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReleaseFreeze_TamperedFrozenDatabase_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                var request = CreateIntegrityReleaseRequest(root);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        root,
+                        request.UserId,
+                        ProjectRole.Admin,
+                        request.Release.ReleaseId);
+
+                string frozenDatabasePath = Path.Combine(
+                    root,
+                    checkpoint.RelativeCheckpointPath,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                File.AppendAllText(
+                    frozenDatabasePath,
+                    "Tampered after release.");
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] frozenBefore =
+                    File.ReadAllBytes(frozenDatabasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    "HISTORICAL_CHECKPOINT_COVERAGE",
+                    report.Items[11].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    frozenBefore,
+                    File.ReadAllBytes(frozenDatabasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
         private static (UserId UserId, ReleaseRecord Release)
             CreateIntegrityReleaseRequest(string root)
         {
