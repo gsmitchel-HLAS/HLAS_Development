@@ -3327,6 +3327,672 @@ namespace HLAS.Tests
             return (userId, release);
         }
         [TestMethod]
+        public void ProjectIntegrityReceipt_DeletedSuccessfulReceipt_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                InternalSeriesTransitionRecord receipt =
+                    CreateIntegrityReceipt(root);
+
+                using (SqliteConnection connection =
+                    OpenDatabase(root))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                DELETE FROM HLAS_Internal_Series_Transitions
+                WHERE TransitionId = $transitionId;
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$transitionId",
+                        receipt.TransitionId.Value.ToString("D"));
+
+                    Assert.AreEqual(
+                        1,
+                        command.ExecuteNonQuery());
+                }
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "INTERNAL_SERIES_RECEIPTS",
+                    report.Items[10].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[10].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReceipt_BrokenReleaseFreezeLink_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                InternalSeriesTransitionRecord receipt =
+                    CreateIntegrityReceipt(root);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false,
+                    ForeignKeys = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Internal_Series_Transitions
+                SET ReleaseFreezeId = $wrongFreezeId
+                WHERE TransitionId = $transitionId;
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$wrongFreezeId",
+                        Guid.NewGuid().ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$transitionId",
+                        receipt.TransitionId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "INTERNAL_SERIES_RECEIPTS",
+                    report.Items[10].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[10].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReceipt_BrokenReleaseLink_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                InternalSeriesTransitionRecord receipt =
+                    CreateIntegrityReceipt(root);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false,
+                    ForeignKeys = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Internal_Series_Transitions
+                SET ReleaseId = $wrongReleaseId
+                WHERE TransitionId = $transitionId;
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$wrongReleaseId",
+                        Guid.NewGuid().ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$transitionId",
+                        receipt.TransitionId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "INTERNAL_SERIES_RECEIPTS",
+                    report.Items[10].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[10].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReceipt_WrongProjectId_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                InternalSeriesTransitionRecord receipt =
+                    CreateIntegrityReceipt(root);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                using (SqliteConnection connection =
+                    OpenDatabase(root))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Internal_Series_Transitions
+                SET ProjectId = $wrongProjectId
+                WHERE TransitionId = $transitionId;
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$wrongProjectId",
+                        Guid.NewGuid().ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$transitionId",
+                        receipt.TransitionId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "INTERNAL_SERIES_RECEIPTS",
+                    report.Items[10].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[10].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReceipt_MissingReleaseManifest_ReportsBothFailuresWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                var request = CreateIntegrityReleaseRequest(root);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        root,
+                        request.UserId,
+                        ProjectRole.Admin,
+                        request.Release.ReleaseId);
+
+                _ = CreateTransitionForTest(
+                    root,
+                    request.UserId,
+                    ProjectRole.Admin,
+                    SeriesId.A,
+                    request.Release.ReleaseId);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    checkpoint.ManifestRelativePath);
+
+                File.Delete(manifestPath);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    "INTERNAL_SERIES_RECEIPTS",
+                    report.Items[10].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[10].Status);
+
+                Assert.IsFalse(File.Exists(manifestPath));
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReceipt_TamperedReleaseManifest_ReportsBothFailuresWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                var request = CreateIntegrityReleaseRequest(root);
+
+                HistoricalCheckpointRecord checkpoint =
+                    ReleaseFreezeGateway.CreateReleaseFreeze(
+                        root,
+                        request.UserId,
+                        ProjectRole.Admin,
+                        request.Release.ReleaseId);
+
+                _ = CreateTransitionForTest(
+                    root,
+                    request.UserId,
+                    ProjectRole.Admin,
+                    SeriesId.A,
+                    request.Release.ReleaseId);
+
+                string manifestPath = Path.Combine(
+                    root,
+                    checkpoint.ManifestRelativePath);
+
+                File.AppendAllText(
+                    manifestPath,
+                    Environment.NewLine);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                byte[] manifestBefore =
+                    File.ReadAllBytes(manifestPath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "RELEASE_FREEZE",
+                    report.Items[9].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    "INTERNAL_SERIES_RECEIPTS",
+                    report.Items[10].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[10].Status);
+
+                Assert.AreEqual(
+                    "HISTORICAL_CHECKPOINT_COVERAGE",
+                    report.Items[11].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+
+                CollectionAssert.AreEqual(
+                    manifestBefore,
+                    File.ReadAllBytes(manifestPath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReceipt_MalformedTransitionId_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                InternalSeriesTransitionRecord receipt =
+                    CreateIntegrityReceipt(root);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                using (SqliteConnection connection =
+                    OpenDatabase(root))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Internal_Series_Transitions
+                SET TransitionId = $invalidId
+                WHERE TransitionId = $transitionId;
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$invalidId",
+                        "INVALID_TRANSITION_ID");
+
+                    command.Parameters.AddWithValue(
+                        "$transitionId",
+                        receipt.TransitionId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "INTERNAL_SERIES_RECEIPTS",
+                    report.Items[10].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[10].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
+        public void ProjectIntegrityReceipt_MalformedProjectId_ReportsFailureWithoutWrites()
+        {
+            string root = CreateTemporaryProjectRoot();
+
+            try
+            {
+                InternalSeriesTransitionRecord receipt =
+                    CreateIntegrityReceipt(root);
+
+                string databasePath = Path.Combine(
+                    root,
+                    ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false,
+                    ForeignKeys = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Internal_Series_Transitions
+                SET ProjectId = $invalidProjectId
+                WHERE TransitionId = $transitionId;
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$invalidProjectId",
+                        "INVALID_PROJECT_ID");
+
+                    command.Parameters.AddWithValue(
+                        "$transitionId",
+                        receipt.TransitionId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                byte[] databaseBefore =
+                    File.ReadAllBytes(databasePath);
+
+                ProjectManifest project =
+                    ProjectPackageReader.Open(root);
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        root,
+                        project.ProjectId);
+
+                Assert.AreEqual(
+                    "INTERNAL_SERIES_RECEIPTS",
+                    report.Items[10].CheckCode);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    report.Items[10].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[9].Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    report.Items[11].Status);
+
+                SqliteConnection.ClearAllPools();
+
+                CollectionAssert.AreEqual(
+                    databaseBefore,
+                    File.ReadAllBytes(databasePath));
+            }
+            finally
+            {
+                DeleteTemporaryProjectRoot(root);
+            }
+        }
+        [TestMethod]
         public void ProjectIntegrityReceipt_NoReceipts_ReturnsNotChecked()
         {
             string root = CreateTemporaryProjectRoot();
