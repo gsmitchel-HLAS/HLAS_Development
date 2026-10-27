@@ -131,7 +131,19 @@ namespace HLAS.Infrastructure
                 throw new InvalidOperationException(
                     "SAFE-STOP: Governed custody path escapes HLAS_Source_Evidence.");
             }
+            string expectedRelativeCustodyPath =
+    Path.Combine(
+        record.EvidenceId.Value.ToString("D"),
+        record.OriginalFileName);
 
+            if (!string.Equals(
+                relativeToEvidenceRoot,
+                expectedRelativeCustodyPath,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "SAFE-STOP: Governed custody path does not match its EvidenceId folder and original filename.");
+            }
             if (!File.Exists(controlledFilePath))
             {
                 throw new FileNotFoundException(
