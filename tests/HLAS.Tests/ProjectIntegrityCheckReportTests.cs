@@ -20,7 +20,33 @@ namespace HLAS.Tests
             Assert.AreEqual("NOT_CHECKED",
                 ProjectIntegrityCheckStatus.NotChecked.Value);
         }
+        [TestMethod]
+        public void Item_NullOrWhitespaceValues_AreRejected()
+        {
+            Assert.ThrowsExactly<ArgumentException>(
+                () => new ProjectIntegrityCheckItem(
+                    null!,
+                    ProjectIntegrityCheckStatus.Verified,
+                    "Valid detail"));
 
+            Assert.ThrowsExactly<ArgumentException>(
+                () => new ProjectIntegrityCheckItem(
+                    " \t ",
+                    ProjectIntegrityCheckStatus.Verified,
+                    "Valid detail"));
+
+            Assert.ThrowsExactly<ArgumentException>(
+                () => new ProjectIntegrityCheckItem(
+                    "CUSTODY",
+                    ProjectIntegrityCheckStatus.Verified,
+                    null!));
+
+            Assert.ThrowsExactly<ArgumentException>(
+                () => new ProjectIntegrityCheckItem(
+                    "CUSTODY",
+                    ProjectIntegrityCheckStatus.Verified,
+                    " \t "));
+        }
         [TestMethod]
         public void Item_InvalidValues_AreRejected()
         {
@@ -79,7 +105,94 @@ namespace HLAS.Tests
                 ProjectIntegrityCheckStatus.NotChecked,
                 report.Items[2].Status);
         }
+        [TestMethod]
+        public void Report_MixedStatuses_RejectsLaterMutation()
+        {
+            ProjectId projectId = ProjectId.CreateNew();
 
+            List<ProjectIntegrityCheckItem> source = new()
+    {
+        new(
+            "PROJECT_IDENTITY",
+            ProjectIntegrityCheckStatus.Verified,
+            "Identity verified."),
+
+        new(
+            "SOURCE_EVIDENCE_CUSTODY",
+            ProjectIntegrityCheckStatus.IntegrityFailure,
+            "Controlled evidence failed verification."),
+
+        new(
+            "GOVERNED_OPERATIONS",
+            ProjectIntegrityCheckStatus.Pending,
+            "An operation remains open."),
+
+        new(
+            "PROJECT_WIDE_SNAPSHOT_CONSISTENCY",
+            ProjectIntegrityCheckStatus.NotChecked,
+            "A project-wide snapshot is not verified.")
+    };
+
+            ProjectIntegrityCheckReport report =
+                new(projectId, source);
+
+            source[1] = new ProjectIntegrityCheckItem(
+                "SOURCE_EVIDENCE_CUSTODY",
+                ProjectIntegrityCheckStatus.Verified,
+                "Replacement result.");
+
+            IList<ProjectIntegrityCheckItem> reportedItems =
+                (IList<ProjectIntegrityCheckItem>)report.Items;
+
+            Assert.ThrowsExactly<NotSupportedException>(() =>
+            {
+                reportedItems[1] = new ProjectIntegrityCheckItem(
+                    "SOURCE_EVIDENCE_CUSTODY",
+                    ProjectIntegrityCheckStatus.Verified,
+                    "Attempted modification.");
+            });
+
+            Assert.AreEqual(projectId, report.ProjectId);
+            Assert.HasCount(4, report.Items);
+
+            Assert.AreEqual(
+                ProjectIntegrityCheckStatus.IntegrityFailure,
+                report.Items[1].Status);
+
+            Assert.AreEqual(
+                "Controlled evidence failed verification.",
+                report.Items[1].Detail);
+
+            Assert.AreEqual(
+                ProjectIntegrityCheckStatus.Pending,
+                report.Items[2].Status);
+
+            Assert.AreEqual(
+                ProjectIntegrityCheckStatus.NotChecked,
+                report.Items[3].Status);
+        }
+        [TestMethod]
+        public void Report_NullCoverageOrItem_IsRejected()
+        {
+            ProjectId projectId = ProjectId.CreateNew();
+
+            Assert.ThrowsExactly<ArgumentNullException>(
+                () => new ProjectIntegrityCheckReport(
+                    projectId, null!));
+
+            ProjectIntegrityCheckItem[] items =
+            {
+        new(
+            "PROJECT_IDENTITY",
+            ProjectIntegrityCheckStatus.Verified,
+            "Identity verified."),
+        null!
+    };
+
+            Assert.ThrowsExactly<ArgumentException>(
+                () => new ProjectIntegrityCheckReport(
+                    projectId, items));
+        }
         [TestMethod]
         public void Report_EmptyCoverage_IsRejected()
         {

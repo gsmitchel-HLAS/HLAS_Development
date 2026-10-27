@@ -3349,6 +3349,239 @@ namespace HLAS.Tests
                 DeleteRoot(root);
             }
         }
+        [TestMethod]
+        public void Build_TamperedCustodyAndDamagedOperation_PreservesBothFailuresWithoutWrites()
+        {
+            string workspace = NewRoot();
+            string projectRoot = Path.Combine(workspace, "Project");
+
+            try
+            {
+                Directory.CreateDirectory(workspace);
+
+                string sourcePath = Path.Combine(workspace, "Source.txt");
+                File.WriteAllText(sourcePath, "Original developmental evidence.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot, sourcePath);
+
+                GovernedOperationRecord operation =
+                    GovernedOperationService.Begin(
+                        projectRoot,
+                        project.ProjectId,
+                        UserId.CreateNew(),
+                        SeriesId.V,
+                        ProjectRole.Admin,
+                        "DEVELOPMENTAL_TEST");
+
+                GovernedOperationService.FinalizeSuccess(
+                    projectRoot, operation.OperationId);
+
+                string controlledPath = Path.Combine(
+                    projectRoot, evidence.RelativeCustodyPath);
+
+                byte[] tampered = File.ReadAllBytes(controlledPath);
+                Assert.IsNotEmpty(tampered);
+
+                tampered[0] ^= 1;
+                File.WriteAllBytes(controlledPath, tampered);
+
+                string databasePath = Path.Combine(
+                    projectRoot, ProjectPackageCreator.DatabaseFileName);
+
+                SqliteConnectionStringBuilder builder = new()
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
+                };
+
+                using (SqliteConnection connection =
+                    new(builder.ToString()))
+                {
+                    connection.Open();
+
+                    using SqliteCommand command =
+                        connection.CreateCommand();
+
+                    command.CommandText =
+                        """
+                UPDATE HLAS_Governed_Operations
+                SET ProjectId = $wrongProjectId
+                WHERE OperationId = $operationId;
+                """;
+
+                    command.Parameters.AddWithValue(
+                        "$wrongProjectId",
+                        ProjectId.CreateNew().Value.ToString("D"));
+
+                    command.Parameters.AddWithValue(
+                        "$operationId",
+                        operation.OperationId.Value.ToString("D"));
+
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+
+                SqliteConnection.ClearAllPools();
+
+                string[] beforeFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(projectRoot, path)))
+                    .ToArray();
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "GOVERNED_OPERATIONS").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] afterFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(projectRoot, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
+            }
+            finally
+            {
+                DeleteRoot(workspace);
+            }
+        }
+        [TestMethod]
+        public void Build_PendingOperationAndTamperedCustody_PreservesMixedResultsWithoutWrites()
+        {
+            string workspace = NewRoot();
+            string projectRoot = Path.Combine(workspace, "Project");
+
+            try
+            {
+                Directory.CreateDirectory(workspace);
+
+                string sourcePath = Path.Combine(workspace, "Source.txt");
+                File.WriteAllText(
+                    sourcePath, "Original developmental evidence.");
+
+                ProjectManifest project =
+                    ProjectPackageCreator.CreateNew(projectRoot);
+
+                EvidenceCustodyRecord evidence =
+                    ProductionSourceEvidenceIntakeGateway.Accept(
+                        projectRoot, sourcePath);
+
+                _ = GovernedOperationService.Begin(
+                    projectRoot,
+                    project.ProjectId,
+                    UserId.CreateNew(),
+                    SeriesId.V,
+                    ProjectRole.Admin,
+                    "DEVELOPMENTAL_TEST");
+
+                string controlledPath = Path.Combine(
+                    projectRoot, evidence.RelativeCustodyPath);
+
+                byte[] tampered = File.ReadAllBytes(controlledPath);
+                Assert.IsNotEmpty(tampered);
+
+                tampered[0] ^= 1;
+                File.WriteAllBytes(controlledPath, tampered);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] beforeFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                byte[][] beforeBytes = beforeFiles
+                    .Select(path => File.ReadAllBytes(
+                        Path.Combine(projectRoot, path)))
+                    .ToArray();
+
+                ProjectIntegrityCheckReport report =
+                    ProjectIntegrityProjectReportBuilder.Build(
+                        projectRoot, project.ProjectId);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Verified,
+                    GetItem(report, "PROJECT_IDENTITY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    GetItem(report, "SOURCE_EVIDENCE_REQUIREMENTS").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    GetItem(report, "SOURCE_EVIDENCE_CUSTODY").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.Pending,
+                    GetItem(report, "GOVERNED_OPERATIONS").Status);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.NotChecked,
+                    GetItem(report, "PROJECT_WIDE_SNAPSHOT_CONSISTENCY").Status);
+
+                SqliteConnection.ClearAllPools();
+
+                string[] afterFiles = Directory
+                    .GetFiles(projectRoot, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(projectRoot, path))
+                    .OrderBy(path => path, StringComparer.Ordinal)
+                    .ToArray();
+
+                CollectionAssert.AreEqual(beforeFiles, afterFiles);
+
+                for (int i = 0; i < beforeFiles.Length; i++)
+                {
+                    CollectionAssert.AreEqual(
+                        beforeBytes[i],
+                        File.ReadAllBytes(
+                            Path.Combine(projectRoot, beforeFiles[i])),
+                        beforeFiles[i]);
+                }
+            }
+            finally
+            {
+                DeleteRoot(workspace);
+            }
+        }
         private static ProjectIntegrityCheckItem GetItem(
             ProjectIntegrityCheckReport report,
             string checkCode)
