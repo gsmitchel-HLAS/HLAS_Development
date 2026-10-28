@@ -89,7 +89,8 @@ namespace HLAS.Infrastructure
                 SqliteConnectionStringBuilder connectionBuilder = new()
                 {
                     DataSource = databasePath,
-                    Mode = SqliteOpenMode.ReadWrite
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false
                 };
 
                 using (SqliteConnection connection =

@@ -417,6 +417,10 @@ namespace HLAS.Tests
                 SqliteConnection.ClearAllPools();
 
                 byte[] databaseBefore = File.ReadAllBytes(databasePath);
+                byte[] manifestBefore = File.ReadAllBytes(
+    Path.Combine(
+        sample.ProjectRoot,
+        ProjectPackageCreator.ManifestFileName));
                 byte[] originalBefore = File.ReadAllBytes(controlledPath);
                 byte[] alternateBefore = File.ReadAllBytes(alternatePath);
 
@@ -427,12 +431,37 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.IntegrityFailure,
                     result.Status);
+                ProjectIntegrityCheckReport integratedReport =
+    ProjectIntegrityProjectReportBuilder.Build(
+        sample.ProjectRoot,
+        ProjectPackageReader.Open(sample.ProjectRoot).ProjectId);
 
+                ProjectIntegrityCheckItem? integratedCustody = null;
+
+                foreach (ProjectIntegrityCheckItem item in integratedReport.Items)
+                {
+                    if (item.CheckCode == "SOURCE_EVIDENCE_CUSTODY")
+                    {
+                        integratedCustody = item;
+                        break;
+                    }
+                }
+
+                Assert.IsNotNull(integratedCustody);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    integratedCustody.Status);
                 SqliteConnection.ClearAllPools();
 
                 CollectionAssert.AreEqual(
                     databaseBefore, File.ReadAllBytes(databasePath));
-
+                CollectionAssert.AreEqual(
+    manifestBefore,
+    File.ReadAllBytes(
+        Path.Combine(
+            sample.ProjectRoot,
+            ProjectPackageCreator.ManifestFileName)));
                 CollectionAssert.AreEqual(
                     originalBefore, File.ReadAllBytes(controlledPath));
 
@@ -532,7 +561,27 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.IntegrityFailure,
                     result.Status);
+                ProjectIntegrityCheckReport integratedReport =
+    ProjectIntegrityProjectReportBuilder.Build(
+        sample.ProjectRoot,
+        ProjectPackageReader.Open(sample.ProjectRoot).ProjectId);
 
+                ProjectIntegrityCheckItem? integratedCustody = null;
+
+                foreach (ProjectIntegrityCheckItem item in integratedReport.Items)
+                {
+                    if (item.CheckCode == "SOURCE_EVIDENCE_CUSTODY")
+                    {
+                        integratedCustody = item;
+                        break;
+                    }
+                }
+
+                Assert.IsNotNull(integratedCustody);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    integratedCustody.Status);
                 SqliteConnection.ClearAllPools();
 
                 CollectionAssert.AreEqual(
@@ -591,7 +640,16 @@ namespace HLAS.Tests
 
                     Assert.AreEqual(1, command.ExecuteNonQuery());
                 }
-
+                var countsBefore = ReadCounts(sample.ProjectRoot);
+                byte[] databaseBefore = File.ReadAllBytes(databasePath);
+                byte[] manifestBefore = File.ReadAllBytes(
+    Path.Combine(
+        sample.ProjectRoot,
+        ProjectPackageCreator.ManifestFileName));
+                byte[] controlledBefore = File.ReadAllBytes(
+    Path.Combine(
+        sample.ProjectRoot,
+        sample.Evidence.RelativeCustodyPath));
                 ProjectIntegrityCheckItem result =
                     ProjectIntegrityRegisteredSourceEvidenceVerifier.Check(
                         sample.ProjectRoot);
@@ -599,6 +657,45 @@ namespace HLAS.Tests
                 Assert.AreEqual(
                     ProjectIntegrityCheckStatus.IntegrityFailure,
                     result.Status);
+                ProjectIntegrityCheckReport integratedReport =
+    ProjectIntegrityProjectReportBuilder.Build(
+        sample.ProjectRoot,
+        ProjectPackageReader.Open(sample.ProjectRoot).ProjectId);
+
+                ProjectIntegrityCheckItem? integratedCustody = null;
+
+                foreach (ProjectIntegrityCheckItem item in integratedReport.Items)
+                {
+                    if (item.CheckCode == "SOURCE_EVIDENCE_CUSTODY")
+                    {
+                        integratedCustody = item;
+                        break;
+                    }
+                }
+
+                Assert.IsNotNull(integratedCustody);
+
+                Assert.AreEqual(
+                    ProjectIntegrityCheckStatus.IntegrityFailure,
+                    integratedCustody.Status);
+                Assert.AreEqual(
+    countsBefore,
+    ReadCounts(sample.ProjectRoot));
+                CollectionAssert.AreEqual(
+    databaseBefore,
+    File.ReadAllBytes(databasePath));
+                CollectionAssert.AreEqual(
+    manifestBefore,
+    File.ReadAllBytes(
+        Path.Combine(
+            sample.ProjectRoot,
+            ProjectPackageCreator.ManifestFileName)));
+                CollectionAssert.AreEqual(
+    controlledBefore,
+    File.ReadAllBytes(
+        Path.Combine(
+            sample.ProjectRoot,
+            sample.Evidence.RelativeCustodyPath)));
             }
             finally
             {
